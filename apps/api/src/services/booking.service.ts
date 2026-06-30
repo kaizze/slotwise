@@ -16,6 +16,53 @@ interface CreateBookingInput {
   channel: BookingChannel;
 }
 
+// ─── Row types ────────────────────────────────────────────────────────────────
+// Explicit shapes for raw query results — db.query() defaults to
+// Record<string, unknown> when no type argument is given, which makes every
+// field access `unknown` and therefore unusable as a SQL param or in
+// arithmetic without an explicit (and easy to get wrong) cast at each call
+// site. Declaring the actual selected columns here means the compiler
+// verifies field access against what the SQL really selects.
+
+interface ServiceDurationRow {
+  duration_minutes: number;
+  price: number;
+}
+
+interface CustomerRiskRow {
+  no_show_count: number;
+  total_bookings: number;
+}
+
+interface BookingRow {
+  id: string;
+  ref: string;
+  business_id: string;
+  service_id: string;
+  staff_id: string;
+  customer_id: string;
+  starts_at: Date;
+  ends_at: Date;
+  status: Booking['status'];
+  channel: Booking['channel'];
+  notes: string | null;
+  no_show_risk: number;
+  created_at: Date;
+  updated_at: Date;
+  service_name?: string;
+  service_color?: string;
+  staff_name?: string;
+  customer_name?: string;
+  customer_phone?: string;
+}
+
+interface WaitlistEntryRow {
+  id: string;
+  customer_id: string;
+  phone: string;
+  name: string;
+}
+
 // ─── Booking reference generator ──────────────────────────────────────────────
 
 function generateRef(): string {
@@ -66,7 +113,7 @@ export const BookingService = {
 
   async create(input: CreateBookingInput): Promise<Booking> {
     // Get service duration to calculate end time
-    const service = await db.query(
+    const service = await db.query<ServiceDurationRow>(
       'SELECT duration_minutes, price FROM services WHERE id = $1',
       [input.serviceId]
     );
@@ -88,7 +135,7 @@ export const BookingService = {
     }
 
     // Calculate no-show risk
-    const customer = await db.query(
+    const customer = await db.query<CustomerRiskRow>(
       'SELECT no_show_count, total_bookings FROM customers WHERE id = $1',
       [input.customerId]
     );
@@ -104,7 +151,7 @@ export const BookingService = {
 
     // Insert booking
     const ref = generateRef();
-    const result = await db.query(`
+    const result = await db.query<BookingRow>(`
       INSERT INTO bookings
         (id, ref, business_id, service_id, staff_id, customer_id,
          starts_at, ends_at, status, channel, notes, no_show_risk)
@@ -135,7 +182,7 @@ export const BookingService = {
   },
 
   async cancel(businessId: string, ref: string, reason?: string): Promise<{ success: boolean; freedSlot: { startsAt: Date; endsAt: Date; staffId: string } }> {
-    const result = await db.query(`
+    const result = await db.query<BookingRow>(`
       UPDATE bookings
       SET status = 'cancelled', notes = COALESCE(notes || ' | ' || $3, notes), updated_at = NOW()
       WHERE ref = $1 AND business_id = $2 AND status = 'confirmed'
@@ -169,7 +216,7 @@ export const BookingService = {
     cancelledBooking: { starts_at: Date; ends_at: Date; staff_id: string }
   ): Promise<void> {
     // 1. Check waitlist first
-    const waitlisted = await db.query(`
+    const waitlisted = await db.query<WaitlistEntryRow>(`
       SELECT w.*, c.phone, c.name FROM waitlist w
       JOIN customers c ON c.id = w.customer_id
       WHERE w.business_id = $1
@@ -189,7 +236,7 @@ export const BookingService = {
     }
 
     // 2. Find consolidation opportunities
-    const remaining = await db.query(`
+    const remaining = await db.query<BookingRow>(`
       SELECT * FROM bookings
       WHERE business_id = $1
         AND staff_id = $2
@@ -209,8 +256,8 @@ export const BookingService = {
     );
 
     // Notify top opportunity customer
-    if (opportunities.length > 0 && opportunities[0].scoreGain >= 15) {
-      const top = opportunities[0];
+    const top = opportunities[0];
+    if (top && top.scoreGain >= 15) {
       const booking = remainingBookings.find((b) => b.id === top.bookingId);
       if (booking) {
         await NotificationService.sendRebookOffer(booking, top);
@@ -219,7 +266,7 @@ export const BookingService = {
   },
 
   async getByPhone(businessId: string, phone: string): Promise<Booking[]> {
-    const result = await db.query(`
+    const result = await db.query<BookingRow>(`
       SELECT b.*, s.name as service_name, st.name as staff_name
       FROM bookings b
       JOIN services s ON s.id = b.service_id
@@ -240,7 +287,7 @@ export const BookingService = {
     from: Date,
     to: Date
   ): Promise<Booking[]> {
-    const result = await db.query(`
+    const result = await db.query<BookingRow>(`
       SELECT b.*, s.name as service_name, s.color as service_color, st.name as staff_name,
              c.name as customer_name, c.phone as customer_phone
       FROM bookings b

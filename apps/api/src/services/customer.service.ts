@@ -36,7 +36,7 @@ export const CustomerService = {
         const updated = await db.queryOneOrThrow(`
           UPDATE customers SET name = $2, email = COALESCE($3, email)
           WHERE id = $1 RETURNING *
-        `, [existing.id, input.name, input.email ?? null]);
+        `, [existing.id as string, input.name, input.email ?? null]);
         return toCustomer(updated);
       }
       return toCustomer(existing);

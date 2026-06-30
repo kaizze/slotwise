@@ -100,7 +100,7 @@ export const AuthService = {
         RETURNING *
       `, [
         randomUUID(),
-        businessRow.id,
+        businessRow.id as string,
         normalizedEmail,
         passwordHash,
         input.ownerName,

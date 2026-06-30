@@ -4,7 +4,13 @@ import { StaffService } from '../services/staff.service';
 import { requireAuth, requireOwner } from '../middleware/auth';
 
 const workingHoursSchema = z.object({
-  dayOfWeek:  z.number().min(0).max(6),
+  // Matches WorkingHours['dayOfWeek'] in @slotwise/types exactly (0=Sunday..6=Saturday)
+  // — a plain z.number().min(0).max(6) only validates the range at runtime and
+  // infers as `number`, not the literal union the shared type requires.
+  dayOfWeek:  z.union([
+    z.literal(0), z.literal(1), z.literal(2), z.literal(3),
+    z.literal(4), z.literal(5), z.literal(6),
+  ]),
   startTime:  z.string(),
   endTime:    z.string(),
   breakStart: z.string().optional(),

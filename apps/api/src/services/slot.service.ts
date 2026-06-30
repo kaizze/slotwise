@@ -1,13 +1,78 @@
 import dayjs from 'dayjs';
 import { db } from '../db/client';
 import { rankSlots } from '@slotwise/slot-optimizer';
-import type { Slot, Booking } from '@slotwise/types';
+import type { Slot, Booking, WorkingHours } from '@slotwise/types';
 
 interface GetSlotsInput {
   businessId: string;
   serviceId: string;
   date: string;         // YYYY-MM-DD or natural language like "Wednesday"
   staffId?: string;
+}
+
+// ─── Row types ────────────────────────────────────────────────────────────────
+// Same rationale as booking.service.ts — explicit shapes for what's actually
+// selected, so field access is checked against real columns instead of
+// silently being `unknown`.
+
+interface ServiceRow {
+  id: string;
+  name: string;
+  description: string | null;
+  duration_minutes: number;
+  price: number;
+  currency: string;
+  color: string;
+}
+
+interface ServiceDurationRow {
+  duration_minutes: number;
+}
+
+interface StaffRow {
+  id: string;
+  name: string;
+  working_hours: WorkingHours[];
+}
+
+interface BookingRow {
+  id: string;
+  ref: string;
+  business_id: string;
+  service_id: string;
+  staff_id: string;
+  customer_id: string;
+  starts_at: Date;
+  ends_at: Date;
+  status: Booking['status'];
+  channel: Booking['channel'];
+  notes: string | null;
+  no_show_risk: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+interface BusinessSettingsRow {
+  settings: { bufferMinutes?: number } & Record<string, unknown>;
+}
+
+function toBooking(row: BookingRow): Booking {
+  return {
+    id: row.id,
+    ref: row.ref,
+    businessId: row.business_id,
+    serviceId: row.service_id,
+    staffId: row.staff_id,
+    customerId: row.customer_id,
+    startsAt: new Date(row.starts_at),
+    endsAt: new Date(row.ends_at),
+    status: row.status,
+    channel: row.channel,
+    notes: row.notes ?? undefined,
+    noShowRisk: Number(row.no_show_risk),
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
 }
 
 function resolveDate(dateStr: string): string {
@@ -39,7 +104,7 @@ export const SlotService = {
       FROM services
       WHERE business_id = $1 AND is_active = TRUE
     `;
-    const params: unknown[] = [businessId];
+    const params: Array<string> = [businessId];
 
     if (query) {
       sql += ` AND name ILIKE $2`;
@@ -47,7 +112,7 @@ export const SlotService = {
     }
 
     sql += ' ORDER BY name ASC';
-    const result = await db.query(sql, params);
+    const result = await db.query<ServiceRow>(sql, params);
     return result.rows;
   },
 
@@ -57,7 +122,7 @@ export const SlotService = {
     const dayEnd   = dayjs(resolvedDate).endOf('day');
 
     // Get service duration
-    const service = await db.query(
+    const service = await db.query<ServiceDurationRow>(
       'SELECT duration_minutes FROM services WHERE id = $1 AND business_id = $2',
       [input.serviceId, input.businessId]
     );
@@ -71,28 +136,28 @@ export const SlotService = {
       WHERE s.business_id = $1 AND s.is_active = TRUE
         AND $2 = ANY(s.service_ids)
     `;
-    const staffParams: unknown[] = [input.businessId, input.serviceId];
+    const staffParams: Array<string> = [input.businessId, input.serviceId];
 
     if (input.staffId) {
       staffQuery += ` AND s.id = $3`;
       staffParams.push(input.staffId);
     }
 
-    const staffResult = await db.query(staffQuery, staffParams);
+    const staffResult = await db.query<StaffRow>(staffQuery, staffParams);
     const staffList = staffResult.rows;
 
     // Get existing bookings for the day
-    const existingResult = await db.query(`
+    const existingResult = await db.query<BookingRow>(`
       SELECT * FROM bookings
       WHERE business_id = $1
         AND starts_at BETWEEN $2 AND $3
         AND status NOT IN ('cancelled')
     `, [input.businessId, dayStart.toDate(), dayEnd.toDate()]);
 
-    const existingBookings: Booking[] = existingResult.rows;
+    const existingBookings: Booking[] = existingResult.rows.map(toBooking);
 
     // Get business settings (buffer time)
-    const bizResult = await db.query(
+    const bizResult = await db.query<BusinessSettingsRow>(
       'SELECT settings FROM businesses WHERE id = $1',
       [input.businessId]
     );
@@ -105,13 +170,7 @@ export const SlotService = {
     const dayOfWeek = dayStart.day();
 
     for (const staff of staffList) {
-      const workingHours = (staff.working_hours as Array<{
-        dayOfWeek: number;
-        startTime: string;
-        endTime: string;
-        breakStart?: string;
-        breakEnd?: string;
-      }>).find((wh) => wh.dayOfWeek === dayOfWeek);
+      const workingHours = staff.working_hours.find((wh) => wh.dayOfWeek === dayOfWeek);
 
       if (!workingHours) continue; // staff doesn't work this day
 

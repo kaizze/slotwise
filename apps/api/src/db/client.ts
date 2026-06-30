@@ -26,14 +26,14 @@ pool.on('error', (err) => {
 
 type QueryValue = string | number | boolean | null | Date | string[] | Buffer;
 
-interface QueryResult<T = Record<string, unknown>> {
+interface QueryResult<T extends pg.QueryResultRow = Record<string, unknown>> {
   rows: T[];
   rowCount: number;
 }
 
 // ─── Core query helper ────────────────────────────────────────────────────────
 
-async function query<T = Record<string, unknown>>(
+async function query<T extends pg.QueryResultRow = Record<string, unknown>>(
   sql: string,
   params: QueryValue[] = []
 ): Promise<QueryResult<T>> {
@@ -59,7 +59,7 @@ async function query<T = Record<string, unknown>>(
 
 // ─── Single row helpers ───────────────────────────────────────────────────────
 
-async function queryOne<T = Record<string, unknown>>(
+async function queryOne<T extends pg.QueryResultRow = Record<string, unknown>>(
   sql: string,
   params: QueryValue[] = []
 ): Promise<T | null> {
@@ -67,7 +67,7 @@ async function queryOne<T = Record<string, unknown>>(
   return result.rows[0] ?? null;
 }
 
-async function queryOneOrThrow<T = Record<string, unknown>>(
+async function queryOneOrThrow<T extends pg.QueryResultRow = Record<string, unknown>>(
   sql: string,
   params: QueryValue[] = [],
   errorMessage = 'Record not found'
@@ -95,21 +95,21 @@ async function transaction<T>(
 
     // Wrap the raw pg client in the same interface as our db helpers
     const txClient: TransactionClient = {
-      query: async <R = Record<string, unknown>>(
+      query: async <R extends pg.QueryResultRow = Record<string, unknown>>(
         sql: string,
         params: QueryValue[] = []
       ): Promise<QueryResult<R>> => {
         const result = await client.query<R>(sql, params);
         return { rows: result.rows, rowCount: result.rowCount ?? 0 };
       },
-      queryOne: async <R = Record<string, unknown>>(
+      queryOne: async <R extends pg.QueryResultRow = Record<string, unknown>>(
         sql: string,
         params: QueryValue[] = []
       ): Promise<R | null> => {
         const result = await client.query<R>(sql, params);
         return result.rows[0] ?? null;
       },
-      queryOneOrThrow: async <R = Record<string, unknown>>(
+      queryOneOrThrow: async <R extends pg.QueryResultRow = Record<string, unknown>>(
         sql: string,
         params: QueryValue[] = [],
         errorMessage = 'Record not found'

@@ -2,12 +2,13 @@
   "name": "@slotwise/api",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "db:migrate": "node -r tsx/cjs src/db/migrate.ts",
-    "db:seed": "node -r tsx/cjs src/db/seed.ts"
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
