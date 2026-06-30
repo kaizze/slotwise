@@ -5,6 +5,9 @@
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm"; -- fuzzy search on customer names
+CREATE EXTENSION IF NOT EXISTS "btree_gist"; -- lets scalar types (uuid) join range
+                                              -- types (tstzrange) in a composite
+                                              -- GIST index — see bookings_slot_range_idx
 
 -- ─── Businesses (tenants) ─────────────────────────────────────────────────────
 
