@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ServiceService } from '../services/service.service';
-import { requireAuth, requireOwner } from '../middleware/auth';
+import { ServiceService } from '../services/service.service.js';
+import { requireAuth, requireOwner } from '../middleware/auth.js';
 
 const createServiceSchema = z.object({
   name:            z.string().min(1),

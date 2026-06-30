@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { StaffService } from '../services/staff.service';
-import { requireAuth, requireOwner } from '../middleware/auth';
+import { StaffService } from '../services/staff.service.js';
+import { requireAuth, requireOwner } from '../middleware/auth.js';
 
 const workingHoursSchema = z.object({
   // Matches WorkingHours['dayOfWeek'] in @slotwise/types exactly (0=Sunday..6=Saturday)

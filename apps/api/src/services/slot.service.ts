@@ -1,5 +1,5 @@
 import dayjs from 'dayjs';
-import { db } from '../db/client';
+import { db } from '../db/client.js';
 import { rankSlots } from '@slotwise/slot-optimizer';
 import type { Slot, Booking, WorkingHours } from '@slotwise/types';
 
@@ -170,7 +170,7 @@ export const SlotService = {
     const dayOfWeek = dayStart.day();
 
     for (const staff of staffList) {
-      const workingHours = staff.working_hours.find((wh) => wh.dayOfWeek === dayOfWeek);
+      const workingHours = staff.working_hours.find((wh: WorkingHours) => wh.dayOfWeek === dayOfWeek);
 
       if (!workingHours) continue; // staff doesn't work this day
 

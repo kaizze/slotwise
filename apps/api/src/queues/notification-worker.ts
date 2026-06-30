@@ -1,7 +1,7 @@
-import { db } from '../db/client';
-import { sendSms, sendWhatsApp } from '../services/providers/twilio.provider';
-import { sendEmail } from '../services/providers/brevo.provider';
-import { smsTemplates, emailTemplates } from '../services/notification-templates';
+import { db } from '../db/client.js';
+import { sendSms, sendWhatsApp } from '../services/providers/twilio.provider.js';
+import { sendEmail } from '../services/providers/brevo.provider.js';
+import { smsTemplates, emailTemplates } from '../services/notification-templates.js';
 
 interface NotificationRow {
   id: string;

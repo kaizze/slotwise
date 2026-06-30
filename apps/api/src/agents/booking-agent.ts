@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { BookingService } from '../services/booking.service';
-import { SlotService } from '../services/slot.service';
-import { CustomerService } from '../services/customer.service';
+import { BookingService } from '../services/booking.service.js';
+import { SlotService } from '../services/slot.service.js';
+import { CustomerService } from '../services/customer.service.js';
 import type { Business } from '@slotwise/types';
 
 const client = new Anthropic();

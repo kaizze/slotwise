@@ -1,5 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { BusinessService } from '../services/business.service';
+import { BusinessService } from '../services/business.service.js';
 import type { Business, AuthTokenPayload } from '@slotwise/types';
 
 // Extend Fastify request type to carry the resolved business + auth payload

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { SlotService } from '../services/slot.service';
-import { BusinessService } from '../services/business.service';
+import { SlotService } from '../services/slot.service.js';
+import { BusinessService } from '../services/business.service.js';
 
 const getSlotsQuerySchema = z.object({
   serviceId: z.string().uuid(),

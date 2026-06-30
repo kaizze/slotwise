@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { BusinessService } from '../services/business.service';
-import { requireAuth, requireOwner } from '../middleware/auth';
+import { BusinessService } from '../services/business.service.js';
+import { requireAuth, requireOwner } from '../middleware/auth.js';
 
 const updateSettingsSchema = z.object({
   slotDurationMinutes: z.number().int().positive().optional(),

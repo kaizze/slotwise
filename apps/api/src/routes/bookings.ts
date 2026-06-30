@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { BookingService } from '../services/booking.service';
-import { CustomerService } from '../services/customer.service';
-import { BusinessService } from '../services/business.service';
-import { requireAuth } from '../middleware/auth';
+import { BookingService } from '../services/booking.service.js';
+import { CustomerService } from '../services/customer.service.js';
+import { BusinessService } from '../services/business.service.js';
+import { requireAuth } from '../middleware/auth.js';
+import type { Booking } from '@slotwise/types';
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ export async function bookingRoutes(fastify: FastifyInstance) {
       new Date(0),
       new Date('2100-01-01')
     );
-    const booking = bookings.find((b) => b.ref === ref);
+    const booking = bookings.find((b: Booking) => b.ref === ref);
 
     if (!booking) return reply.status(404).send({ error: 'Booking not found' });
     return reply.send({ data: booking });

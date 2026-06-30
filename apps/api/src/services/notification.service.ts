@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { db } from '../db/client';
+import { db } from '../db/client.js';
 import type { Booking } from '@slotwise/types';
 import type { ConsolidationSuggestion } from '@slotwise/slot-optimizer';
 

@@ -1,5 +1,5 @@
 import { randomUUID, randomBytes, createHash } from 'crypto';
-import { db } from '../db/client';
+import { db } from '../db/client.js';
 
 const REFRESH_TOKEN_BYTES = 48;
 const REFRESH_TOKEN_TTL_DAYS = 30;

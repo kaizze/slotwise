@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomUUID } from 'crypto';
 import twilio from 'twilio';
-import { db } from '../db/client';
-import { BusinessService } from '../services/business.service';
-import { runAgentTurn } from '../agents/booking-agent';
+import { db } from '../db/client.js';
+import { BusinessService } from '../services/business.service.js';
+import { runAgentTurn } from '../agents/booking-agent.js';
 
 // ─── Twilio request authenticity check ────────────────────────────────────────
 // Twilio signs every webhook request with HMAC-SHA1 over the full request URL

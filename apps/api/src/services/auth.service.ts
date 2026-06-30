@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
 import bcrypt from 'bcrypt';
-import { db } from '../db/client';
-import { UserService } from './user.service';
-import { RefreshTokenService } from './refresh-token.service';
+import { db } from '../db/client.js';
+import { UserService } from './user.service.js';
+import { RefreshTokenService } from './refresh-token.service.js';
 import type { User, Business, AuthTokenPayload } from '@slotwise/types';
 
 const BCRYPT_ROUNDS = 12;

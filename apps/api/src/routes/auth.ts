@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { AuthService } from '../services/auth.service';
-import { UserService } from '../services/user.service';
-import { requireAuth } from '../middleware/auth';
+import { AuthService } from '../services/auth.service.js';
+import { UserService } from '../services/user.service.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const REFRESH_COOKIE_NAME = 'slotwise_refresh';
 const REFRESH_COOKIE_MAX_AGE = 30 * 86_400; // 30 days, in seconds — matches RefreshTokenService TTL

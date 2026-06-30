@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
-import { db } from '../db/client';
+import { db } from '../db/client.js';
 import { rankSlots, scoreNoShowRisk, findConsolidationOpportunities } from '@slotwise/slot-optimizer';
-import { NotificationService } from './notification.service';
+import { NotificationService } from './notification.service.js';
 import type { Booking, BookingChannel, Slot } from '@slotwise/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -258,7 +258,7 @@ export const BookingService = {
     // Notify top opportunity customer
     const top = opportunities[0];
     if (top && top.scoreGain >= 15) {
-      const booking = remainingBookings.find((b) => b.id === top.bookingId);
+      const booking = remainingBookings.find((b: Booking) => b.id === top.bookingId);
       if (booking) {
         await NotificationService.sendRebookOffer(booking, top);
       }

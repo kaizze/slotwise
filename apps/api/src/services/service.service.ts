@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { db } from '../db/client';
+import { db } from '../db/client.js';
 import type { Service } from '@slotwise/types';
 
 function toService(row: Record<string, unknown>): Service {

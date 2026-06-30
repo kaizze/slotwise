@@ -2,8 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import type { AgentMessage } from '@slotwise/types';
-import { BusinessService } from '../services/business.service';
-import { runAgentLoop, buildSystemPrompt } from '../agents/booking-agent';
+import { BusinessService } from '../services/business.service.js';
+import { runAgentLoop, buildSystemPrompt } from '../agents/booking-agent.js';
 
 // ─── Route registration ───────────────────────────────────────────────────────
 
@@ -49,8 +49,8 @@ export async function agentRoutes(fastify: FastifyInstance) {
 
       // Convert back to our format for the client
       const responseMessages: AgentMessage[] = updatedMessages
-        .filter((m) => typeof m.content === 'string')
-        .map((m) => ({
+        .filter((m: Anthropic.MessageParam) => typeof m.content === 'string')
+        .map((m: Anthropic.MessageParam) => ({
           role: m.role as 'user' | 'assistant',
           content: m.content as string,
         }));

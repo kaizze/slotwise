@@ -5,16 +5,16 @@ import rateLimit from '@fastify/rate-limit';
 import formbody from '@fastify/formbody';
 import cookie from '@fastify/cookie';
 
-import { authRoutes } from './routes/auth';
-import { bookingRoutes } from './routes/bookings';
-import { slotRoutes } from './routes/slots';
-import { agentRoutes } from './routes/agent';
-import { staffRoutes } from './routes/staff';
-import { serviceRoutes } from './routes/services';
-import { businessRoutes } from './routes/business';
-import { webhookRoutes } from './routes/webhooks';
-import { db } from './db/client';
-import { startNotificationWorker, stopNotificationWorker } from './queues/notification-worker';
+import { authRoutes } from './routes/auth.js';
+import { bookingRoutes } from './routes/bookings.js';
+import { slotRoutes } from './routes/slots.js';
+import { agentRoutes } from './routes/agent.js';
+import { staffRoutes } from './routes/staff.js';
+import { serviceRoutes } from './routes/services.js';
+import { businessRoutes } from './routes/business.js';
+import { webhookRoutes } from './routes/webhooks.js';
+import { db } from './db/client.js';
+import { startNotificationWorker, stopNotificationWorker } from './queues/notification-worker.js';
 
 const server = Fastify({
   logger: {

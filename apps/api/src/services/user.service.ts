@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import bcrypt from 'bcrypt';
-import { db } from '../db/client';
+import { db } from '../db/client.js';
 import type { User, UserRole } from '@slotwise/types';
 
 const BCRYPT_ROUNDS = 12;
