@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Salon Eleni — Example Site</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body { font-family: -apple-system, sans-serif; max-width: 640px; margin: 80px auto; padding: 0 20px; color: #18181b; }
+    h1 { font-size: 28px; }
+    p { color: #52525b; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <h1>Salon Eleni</h1>
+  <p>
+    This page stands in for a real client website — a WordPress salon site,
+    a Wix page, anything. The booking widget is dropped in with one script
+    tag and floats in the bottom-right corner regardless of what else is on
+    the page.
+  </p>
+  <p>
+    Click the calendar bubble in the corner to try the booking flow against
+    the locally seeded "Salon Eleni" business.
+  </p>
+
+  <!--
+    In production this points at the built, hosted bundle:
+    https://cdn.slotwise.app/slotwise-widget.js
+
+    For local development against `npm run dev` in apps/api, override the
+    API base via data-api-base as shown below.
+  -->
+  <script
+    src="/dist/slotwise-widget.js"
+    data-business="salon-eleni"
+    data-accent="#ec4899"
+    data-api-base="http://localhost:3001"
+    defer
+  ></script>
+</body>
+</html>

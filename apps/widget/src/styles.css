@@ -1,0 +1,473 @@
+/* All selectors are scoped inside the widget's Shadow Root — none of this
+   leaks to the host page, and the host page's styles can't reach in either.
+   Theming surface: --sw-accent, set via the host element's data-accent attribute. */
+
+:host {
+  --sw-accent: #6366f1;
+  --sw-accent-ink: #ffffff;
+  --sw-ink: #18181b;
+  --sw-ink-muted: #71717a;
+  --sw-surface: #ffffff;
+  --sw-surface-sunken: #f4f4f5;
+  --sw-border: #e4e4e7;
+  --sw-danger: #dc2626;
+  --sw-radius: 14px;
+  --sw-radius-sm: 9px;
+  --sw-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+
+  all: initial;
+  font-family: var(--sw-font);
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999999;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ── Launcher ─────────────────────────────────────────────────────────────── */
+
+.sw-launcher {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: var(--sw-accent);
+  color: var(--sw-accent-ink);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sw-launcher:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.sw-launcher:focus-visible {
+  outline: 2px solid var(--sw-accent);
+  outline-offset: 3px;
+}
+
+.sw-launcher svg {
+  width: 26px;
+  height: 26px;
+}
+
+.sw-launcher .sw-icon-close {
+  display: none;
+}
+
+.sw-launcher[data-open='true'] .sw-icon-calendar {
+  display: none;
+}
+.sw-launcher[data-open='true'] .sw-icon-close {
+  display: block;
+}
+
+/* ── Panel ────────────────────────────────────────────────────────────────── */
+
+.sw-panel {
+  position: absolute;
+  bottom: 76px;
+  right: 0;
+  width: 360px;
+  max-width: calc(100vw - 40px);
+  max-height: min(640px, calc(100vh - 120px));
+  background: var(--sw-surface);
+  border-radius: var(--sw-radius);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(12px) scale(0.98);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.sw-panel[data-open='true'] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sw-panel,
+  .sw-launcher {
+    transition: none;
+  }
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+
+.sw-header {
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--sw-border);
+  flex-shrink: 0;
+}
+
+.sw-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--sw-ink);
+}
+
+.sw-header p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--sw-ink-muted);
+}
+
+.sw-progress {
+  display: flex;
+  gap: 5px;
+  margin-top: 12px;
+}
+
+.sw-progress-dot {
+  height: 4px;
+  flex: 1;
+  border-radius: 2px;
+  background: var(--sw-border);
+  transition: background 0.2s ease;
+}
+
+.sw-progress-dot[data-state='active'],
+.sw-progress-dot[data-state='done'] {
+  background: var(--sw-accent);
+}
+
+/* ── Body ─────────────────────────────────────────────────────────────────── */
+
+.sw-body {
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.sw-back {
+  background: none;
+  border: none;
+  color: var(--sw-ink-muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sw-back:hover {
+  color: var(--sw-ink);
+}
+
+/* ── Service list ─────────────────────────────────────────────────────────── */
+
+.sw-service {
+  width: 100%;
+  text-align: left;
+  background: var(--sw-surface-sunken);
+  border: 1px solid transparent;
+  border-radius: var(--sw-radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: border-color 0.12s ease;
+}
+
+.sw-service:hover {
+  border-color: var(--sw-accent);
+}
+
+.sw-service-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sw-service-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.sw-service-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sw-ink);
+}
+
+.sw-service-meta {
+  font-size: 12px;
+  color: var(--sw-ink-muted);
+  margin-top: 1px;
+}
+
+.sw-service-price {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sw-ink);
+  flex-shrink: 0;
+}
+
+/* ── Date picker (simple horizontal strip) ───────────────────────────────── */
+
+.sw-date-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-bottom: 16px;
+  scrollbar-width: none;
+}
+.sw-date-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.sw-date-chip {
+  flex-shrink: 0;
+  width: 52px;
+  padding: 8px 0;
+  border-radius: var(--sw-radius-sm);
+  border: 1px solid var(--sw-border);
+  background: var(--sw-surface);
+  cursor: pointer;
+  text-align: center;
+  font-family: var(--sw-font);
+}
+
+.sw-date-chip[data-selected='true'] {
+  background: var(--sw-accent);
+  border-color: var(--sw-accent);
+}
+.sw-date-chip[data-selected='true'] .sw-date-chip-day,
+.sw-date-chip[data-selected='true'] .sw-date-chip-num {
+  color: var(--sw-accent-ink);
+}
+
+.sw-date-chip-day {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--sw-ink-muted);
+  letter-spacing: 0.03em;
+}
+
+.sw-date-chip-num {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--sw-ink);
+  margin-top: 2px;
+}
+
+/* ── Slot list ────────────────────────────────────────────────────────────── */
+
+.sw-slot {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--sw-surface-sunken);
+  border: 1px solid transparent;
+  border-radius: var(--sw-radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+
+.sw-slot:hover {
+  border-color: var(--sw-accent);
+}
+
+.sw-slot-time {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sw-ink);
+}
+
+.sw-slot-staff {
+  font-size: 12px;
+  color: var(--sw-ink-muted);
+  margin-top: 1px;
+}
+
+/* Subtle nod to the optimizer — opacity reflects slot score, not a sales pitch */
+.sw-slot-quality {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sw-accent);
+  flex-shrink: 0;
+}
+
+.sw-empty {
+  text-align: center;
+  padding: 32px 12px;
+  color: var(--sw-ink-muted);
+  font-size: 13px;
+}
+
+/* ── Form ─────────────────────────────────────────────────────────────────── */
+
+.sw-field {
+  margin-bottom: 12px;
+}
+
+.sw-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sw-ink-muted);
+  margin-bottom: 5px;
+}
+
+.sw-field input {
+  width: 100%;
+  font-family: var(--sw-font);
+  font-size: 14px;
+  color: var(--sw-ink);
+  padding: 10px 12px;
+  border-radius: var(--sw-radius-sm);
+  border: 1px solid var(--sw-border);
+  background: var(--sw-surface);
+}
+
+.sw-field input:focus {
+  outline: none;
+  border-color: var(--sw-accent);
+}
+
+.sw-summary {
+  background: var(--sw-surface-sunken);
+  border-radius: var(--sw-radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.sw-summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+
+.sw-summary-label {
+  color: var(--sw-ink-muted);
+}
+
+.sw-summary-value {
+  font-weight: 500;
+  color: var(--sw-ink);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+
+.sw-button {
+  width: 100%;
+  padding: 12px;
+  border-radius: var(--sw-radius-sm);
+  border: none;
+  background: var(--sw-accent);
+  color: var(--sw-accent-ink);
+  font-family: var(--sw-font);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.sw-button:hover {
+  opacity: 0.92;
+}
+
+.sw-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sw-button:focus-visible {
+  outline: 2px solid var(--sw-accent);
+  outline-offset: 2px;
+}
+
+/* ── States ───────────────────────────────────────────────────────────────── */
+
+.sw-error {
+  background: #fef2f2;
+  color: var(--sw-danger);
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: var(--sw-radius-sm);
+  margin-bottom: 12px;
+}
+
+.sw-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: sw-spin 0.6s linear infinite;
+}
+
+@keyframes sw-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sw-spinner {
+    animation: none;
+  }
+}
+
+.sw-loading-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 0;
+  color: var(--sw-ink-muted);
+}
+
+/* ── Confirmation ─────────────────────────────────────────────────────────── */
+
+.sw-confirm-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--sw-accent);
+  color: var(--sw-accent-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 8px auto 16px;
+}
+
+.sw-confirm-title {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--sw-ink);
+  margin-bottom: 4px;
+}
+
+.sw-confirm-ref {
+  text-align: center;
+  font-size: 13px;
+  color: var(--sw-ink-muted);
+  margin-bottom: 20px;
+}

@@ -1,0 +1,276 @@
+import Anthropic from '@anthropic-ai/sdk';
+import { BookingService } from '../services/booking.service';
+import { SlotService } from '../services/slot.service';
+import { CustomerService } from '../services/customer.service';
+import type { Business } from '@slotwise/types';
+
+const client = new Anthropic();
+
+// ─── Tool definitions ─────────────────────────────────────────────────────────
+
+export const AGENT_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'get_services',
+    description: 'List available services for this business. Call this first to match what the customer wants.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Optional filter e.g. "haircut", "manicure"' },
+      },
+    },
+  },
+  {
+    name: 'get_available_slots',
+    description: 'Get scored available appointment slots. Always call this before presenting options — never invent slots.',
+    input_schema: {
+      type: 'object' as const,
+      required: ['service_id'],
+      properties: {
+        service_id:  { type: 'string' },
+        date:        { type: 'string', description: 'YYYY-MM-DD or natural e.g. "Wednesday", "tomorrow"' },
+        staff_id:    { type: 'string', description: 'Optional staff preference' },
+      },
+    },
+  },
+  {
+    name: 'find_or_create_customer',
+    description: 'Look up customer by phone. Creates a new record if not found.',
+    input_schema: {
+      type: 'object' as const,
+      required: ['phone', 'name'],
+      properties: {
+        phone: { type: 'string' },
+        name:  { type: 'string' },
+        email: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'create_booking',
+    description: 'Create the appointment. Only call after confirming all details with the customer.',
+    input_schema: {
+      type: 'object' as const,
+      required: ['service_id', 'staff_id', 'slot_datetime', 'customer_id'],
+      properties: {
+        service_id:    { type: 'string' },
+        staff_id:      { type: 'string' },
+        slot_datetime: { type: 'string', description: 'ISO 8601 datetime' },
+        customer_id:   { type: 'string' },
+        notes:         { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'get_customer_bookings',
+    description: 'Look up existing and upcoming bookings for a customer.',
+    input_schema: {
+      type: 'object' as const,
+      required: ['phone'],
+      properties: {
+        phone: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'cancel_booking',
+    description: 'Cancel an existing booking by its reference.',
+    input_schema: {
+      type: 'object' as const,
+      required: ['booking_ref'],
+      properties: {
+        booking_ref: { type: 'string' },
+        reason:      { type: 'string' },
+      },
+    },
+  },
+];
+
+// ─── System prompt builder ────────────────────────────────────────────────────
+
+export function buildSystemPrompt(business: Pick<Business, 'name' | 'type' | 'locale' | 'settings'>): string {
+  return `You are the booking assistant for ${business.name}, a ${business.type}.
+
+LANGUAGE: Detect the customer's language and respond in the same language throughout.
+
+YOUR JOB:
+1. Understand what they want (service, date/time, staff preference)
+2. Call get_services to confirm the service exists and get its ID
+3. Call get_available_slots — show maximum 3 options, never a full grid
+4. Collect name + phone to identify the customer
+5. Summarise the booking details clearly and ask for confirmation
+6. Only after confirmation: call create_booking
+7. Confirm with the booking reference
+
+RULES:
+- Never invent or guess available slots — always call get_available_slots first
+- Keep responses short and conversational — this is a chat, not an email
+- If ambiguous (e.g. "Wednesday" could mean this week or next), ask
+- If the customer wants to cancel or reschedule, get their phone first to look up their bookings
+- Do not offer discounts unless the system explicitly provides them
+- Do not mention internal IDs to the customer
+
+TONE: Friendly, efficient, brief. No filler phrases like "Of course!" or "Certainly!".`;
+}
+
+// ─── Tool dispatcher ──────────────────────────────────────────────────────────
+
+export async function dispatchTool(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  context: { businessId: string }
+): Promise<string> {
+  const { businessId } = context;
+
+  try {
+    switch (toolName) {
+      case 'get_services': {
+        const services = await SlotService.getServices(businessId, toolInput.query as string);
+        return JSON.stringify(services);
+      }
+
+      case 'get_available_slots': {
+        const slots = await SlotService.getAvailableSlots({
+          businessId,
+          serviceId: toolInput.service_id as string,
+          date: toolInput.date as string,
+          staffId: toolInput.staff_id as string | undefined,
+        });
+        // Return top 3 scored slots only
+        return JSON.stringify(slots.slice(0, 3));
+      }
+
+      case 'find_or_create_customer': {
+        const customer = await CustomerService.findOrCreate({
+          businessId,
+          phone: toolInput.phone as string,
+          name: toolInput.name as string,
+          email: toolInput.email as string | undefined,
+        });
+        return JSON.stringify(customer);
+      }
+
+      case 'create_booking': {
+        const booking = await BookingService.create({
+          businessId,
+          serviceId: toolInput.service_id as string,
+          staffId: toolInput.staff_id as string,
+          slotDatetime: toolInput.slot_datetime as string,
+          customerId: toolInput.customer_id as string,
+          notes: toolInput.notes as string | undefined,
+          channel: 'agent',
+        });
+        return JSON.stringify({ ref: booking.ref, startsAt: booking.startsAt });
+      }
+
+      case 'get_customer_bookings': {
+        const bookings = await BookingService.getByPhone(businessId, toolInput.phone as string);
+        return JSON.stringify(bookings);
+      }
+
+      case 'cancel_booking': {
+        const result = await BookingService.cancel(
+          businessId,
+          toolInput.booking_ref as string,
+          toolInput.reason as string
+        );
+        return JSON.stringify(result);
+      }
+
+      default:
+        return JSON.stringify({ error: `Unknown tool: ${toolName}` });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return JSON.stringify({ error: message });
+  }
+}
+
+// ─── Agentic loop ─────────────────────────────────────────────────────────────
+
+export async function runAgentLoop(
+  messages: Anthropic.MessageParam[],
+  systemPrompt: string,
+  businessId: string
+): Promise<{ reply: string; messages: Anthropic.MessageParam[] }> {
+  const MAX_ITERATIONS = 10; // safety ceiling — prevents runaway tool-call loops
+
+  let iterations = 0;
+
+  while (iterations < MAX_ITERATIONS) {
+    iterations++;
+
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5',  // fast + cheap for most turns
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages,
+      tools: AGENT_TOOLS,
+    });
+
+    if (response.stop_reason === 'end_turn') {
+      const textBlock = response.content.find((b) => b.type === 'text');
+      const reply = textBlock?.type === 'text' ? textBlock.text : '';
+      return { reply, messages };
+    }
+
+    if (response.stop_reason === 'tool_use') {
+      // Append Claude's response to history
+      messages.push({ role: 'assistant', content: response.content });
+
+      // Process all tool calls in this response
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+
+      for (const block of response.content) {
+        if (block.type !== 'tool_use') continue;
+
+        const result = await dispatchTool(
+          block.name,
+          block.input as Record<string, unknown>,
+          { businessId }
+        );
+
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: result,
+        });
+      }
+
+      // Append tool results and loop
+      messages.push({ role: 'user', content: toolResults });
+      continue;
+    }
+
+    // Unexpected stop reason (e.g. max_tokens cutoff)
+    break;
+  }
+
+  return {
+    reply: 'I encountered an issue processing your request. Please try again.',
+    messages,
+  };
+}
+
+// ─── Convenience: run a single text-in, text-out turn ────────────────────────
+// Used by webhook channels (WhatsApp/SMS) that don't carry rich message arrays.
+
+export async function runAgentTurn(
+  history: Array<{ role: 'user' | 'assistant'; content: string }>,
+  userMessage: string,
+  business: Business
+): Promise<{ reply: string; history: Array<{ role: 'user' | 'assistant'; content: string }> }> {
+  const systemPrompt = buildSystemPrompt(business);
+
+  const anthropicMessages: Anthropic.MessageParam[] = [
+    ...history.map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user' as const, content: userMessage },
+  ];
+
+  const { reply, messages } = await runAgentLoop(anthropicMessages, systemPrompt, business.id);
+
+  const updatedHistory = messages
+    .filter((m) => typeof m.content === 'string')
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content as string }));
+
+  return { reply, history: updatedHistory };
+}

@@ -1,0 +1,39 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: slotwise
+      POSTGRES_PASSWORD: slotwise
+      POSTGRES_DB: slotwise
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # NOTE: schema is applied via `npm run db:migrate` (apps/api/src/db/migrate.ts),
+    # not auto-init here. Mounting infrastructure/postgres/schema.sql into
+    # docker-entrypoint-initdb.d would apply the Phase 1 schema directly,
+    # bypassing the _migrations tracking table — migrations 002/003 (users,
+    # refresh_tokens, notification queue fields) would then either be skipped
+    # or collide with tables init already created. Always migrate, never
+    # auto-init, past Phase 1.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U slotwise"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:

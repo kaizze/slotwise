@@ -1,0 +1,37 @@
+{
+  "name": "@slotwise/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "db:migrate": "node -r tsx/cjs src/db/migrate.ts",
+    "db:seed": "node -r tsx/cjs src/db/seed.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.0",
+    "@slotwise/types": "*",
+    "@slotwise/slot-optimizer": "*",
+    "fastify": "^4.27.0",
+    "@fastify/cors": "^9.0.0",
+    "@fastify/jwt": "^8.0.0",
+    "@fastify/rate-limit": "^9.0.0",
+    "@fastify/formbody": "^7.4.0",
+    "@fastify/cookie": "^9.3.0",
+    "bcrypt": "^5.1.1",
+    "pg": "^8.11.0",
+    "redis": "^4.6.0",
+    "twilio": "^5.1.0",
+    "zod": "^3.23.0",
+    "dayjs": "^1.11.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "@types/bcrypt": "^5.0.2",
+    "@types/uuid": "^9.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}
