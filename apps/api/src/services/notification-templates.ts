@@ -1,5 +1,5 @@
 import dayjs from 'dayjs';
-import 'dayjs/locale/el';
+import 'dayjs/locale/el.js';
 
 interface BookingContext {
   customerName: string;
