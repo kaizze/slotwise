@@ -115,8 +115,9 @@ async function transaction<T>(
         errorMessage = 'Record not found'
       ): Promise<R> => {
         const result = await client.query<R>(sql, params);
-        if (!result.rows[0]) throw new Error(errorMessage);
-        return result.rows[0];
+        const row = result.rows[0];
+        if (!row) throw new Error(errorMessage);
+        return row;
       },
     };
 

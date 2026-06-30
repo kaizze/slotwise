@@ -75,6 +75,24 @@ function toBooking(row: BookingRow): Booking {
   };
 }
 
+// Parses "HH:MM" into [hour, minute] with a real runtime check — not just a
+// type-level fix. `"09:00".split(':').map(Number)` produces `number[]`,
+// which under noUncheckedIndexedAccess destructures as `number | undefined`
+// per element; but more importantly, malformed input (e.g. a bad seed value
+// or a future admin-UI bug) would otherwise silently produce NaN and make
+// dayjs construct a garbage date instead of failing loudly here.
+function parseHourMinute(time: string): [number, number] {
+  const parts = time.split(':');
+  const hour = Number(parts[0]);
+  const minute = Number(parts[1]);
+
+  if (parts.length !== 2 || Number.isNaN(hour) || Number.isNaN(minute)) {
+    throw new Error(`Invalid time format: "${time}" (expected "HH:MM")`);
+  }
+
+  return [hour, minute];
+}
+
 function resolveDate(dateStr: string): string {
   // Handle natural language dates
   const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
@@ -126,8 +144,9 @@ export const SlotService = {
       'SELECT duration_minutes FROM services WHERE id = $1 AND business_id = $2',
       [input.serviceId, input.businessId]
     );
-    if (!service.rows[0]) throw new Error('Service not found');
-    const duration = service.rows[0].duration_minutes;
+    const serviceRow = service.rows[0];
+    if (!serviceRow) throw new Error('Service not found');
+    const duration = serviceRow.duration_minutes;
 
     // Get eligible staff
     let staffQuery = `
@@ -174,8 +193,8 @@ export const SlotService = {
 
       if (!workingHours) continue; // staff doesn't work this day
 
-      const [startH, startM] = workingHours.startTime.split(':').map(Number);
-      const [endH, endM] = workingHours.endTime.split(':').map(Number);
+      const [startH, startM] = parseHourMinute(workingHours.startTime);
+      const [endH, endM] = parseHourMinute(workingHours.endTime);
 
       let cursor = dayStart.hour(startH).minute(startM).second(0);
       const workEnd = dayStart.hour(endH).minute(endM).second(0);
@@ -189,8 +208,8 @@ export const SlotService = {
 
         // Skip if in break
         if (workingHours.breakStart && workingHours.breakEnd) {
-          const [bH, bM] = workingHours.breakStart.split(':').map(Number);
-          const [beH, beM] = workingHours.breakEnd.split(':').map(Number);
+          const [bH, bM] = parseHourMinute(workingHours.breakStart);
+          const [beH, beM] = parseHourMinute(workingHours.breakEnd);
           const breakStart = dayStart.hour(bH).minute(bM);
           const breakEnd = dayStart.hour(beH).minute(beM);
           if (cursor.isBefore(breakEnd) && cursor.add(duration, 'minute').isAfter(breakStart)) {

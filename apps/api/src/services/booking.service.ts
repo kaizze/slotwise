@@ -75,8 +75,13 @@ function generateRef(): string {
 // DB rows are snake_case; the Booking interface is camelCase. Extra joined
 // columns (service_name, staff_name, etc.) are preserved for callers that need
 // them, even though they aren't part of the strict Booking type.
+//
+// Takes BookingRow (not a loose Record<string, unknown>) so every field access
+// below is checked against the real query shape rather than cast blindly —
+// the casts that used to live here were silencing the exact class of bug this
+// whole row-typing pass exists to catch.
 
-function toBooking(row: Record<string, unknown>): Booking & {
+function toBooking(row: BookingRow): Booking & {
   serviceName?: string;
   serviceColor?: string;
   staffName?: string;
@@ -84,26 +89,26 @@ function toBooking(row: Record<string, unknown>): Booking & {
   customerPhone?: string;
 } {
   return {
-    id: row.id as string,
-    ref: row.ref as string,
-    businessId: row.business_id as string,
-    serviceId: row.service_id as string,
-    staffId: row.staff_id as string,
-    customerId: row.customer_id as string,
-    startsAt: new Date(row.starts_at as string),
-    endsAt: new Date(row.ends_at as string),
-    status: row.status as Booking['status'],
-    channel: row.channel as Booking['channel'],
-    notes: row.notes as string | undefined,
+    id: row.id,
+    ref: row.ref,
+    businessId: row.business_id,
+    serviceId: row.service_id,
+    staffId: row.staff_id,
+    customerId: row.customer_id,
+    startsAt: new Date(row.starts_at),
+    endsAt: new Date(row.ends_at),
+    status: row.status,
+    channel: row.channel,
+    notes: row.notes ?? undefined,
     noShowRisk: Number(row.no_show_risk),
-    createdAt: new Date(row.created_at as string),
-    updatedAt: new Date(row.updated_at as string),
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
     // Pass through joined display columns when present (undefined otherwise)
-    serviceName: row.service_name as string | undefined,
-    serviceColor: row.service_color as string | undefined,
-    staffName: row.staff_name as string | undefined,
-    customerName: row.customer_name as string | undefined,
-    customerPhone: row.customer_phone as string | undefined,
+    serviceName: row.service_name,
+    serviceColor: row.service_color,
+    staffName: row.staff_name,
+    customerName: row.customer_name,
+    customerPhone: row.customer_phone,
   };
 }
 
@@ -117,10 +122,11 @@ export const BookingService = {
       'SELECT duration_minutes, price FROM services WHERE id = $1',
       [input.serviceId]
     );
-    if (!service.rows[0]) throw new Error('Service not found');
+    const serviceRow = service.rows[0];
+    if (!serviceRow) throw new Error('Service not found');
 
     const startsAt = new Date(input.slotDatetime);
-    const endsAt = new Date(startsAt.getTime() + service.rows[0].duration_minutes * 60_000);
+    const endsAt = new Date(startsAt.getTime() + serviceRow.duration_minutes * 60_000);
 
     // Conflict check
     const conflict = await db.query(`
@@ -164,7 +170,9 @@ export const BookingService = {
       startsAt, endsAt, input.channel, input.notes ?? null, noShowRisk,
     ]);
 
-    const booking = toBooking(result.rows[0]);
+    const insertedRow = result.rows[0];
+    if (!insertedRow) throw new Error('Booking insert returned no row');
+    const booking = toBooking(insertedRow);
 
     // Update customer stats
     await db.query(
@@ -189,9 +197,9 @@ export const BookingService = {
       RETURNING *
     `, [ref, businessId, reason ?? null]);
 
-    if (!result.rows[0]) throw new Error('Booking not found or already cancelled');
-
     const cancelled = result.rows[0];
+    if (!cancelled) throw new Error('Booking not found or already cancelled');
+
     const cancelledBookingTyped = toBooking(cancelled);
 
     await NotificationService.scheduleCancellationNotice(cancelledBookingTyped);
