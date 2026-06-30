@@ -1,5 +1,5 @@
-import Fastify from 'fastify';
-import cors from '@fastify/cors';
+import Fastify, { type FastifyRequest } from 'fastify';
+import cors, { type FastifyCorsOptions } from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import formbody from '@fastify/formbody';
@@ -31,13 +31,41 @@ const server = Fastify({
 //    known at deploy time, so these allow any origin. No cookies are involved,
 //    so this is safe: there's nothing ambient to steal cross-origin.
 //
-// 2. Dashboard/admin endpoints (auth, staff, services, business settings,
-//    authenticated booking management) carry the httpOnly refresh-token
-//    cookie and must be locked to the known dashboard origin(s) with
-//    credentials enabled — open CORS here would let any site ride the
-//    cookie on a logged-in owner's behalf.
+// 2. Dashboard/admin endpoints (auth, staff, services) carry the httpOnly
+//    refresh-token cookie and must be locked to the known dashboard
+//    origin(s) with credentials enabled — open CORS here would let any site
+//    ride the cookie on a logged-in owner's behalf.
+//
+// IMPORTANT: @fastify/cors registers a single global `OPTIONS *` preflight
+// route with no prefix. Registering the plugin more than once anywhere in
+// the same Fastify instance collides on that route with FST_ERR_DUPLICATED_ROUTE
+// — Fastify's plugin encapsulation does NOT protect against this, since the
+// wildcard route is deliberately unprefixed so it can catch preflight
+// requests for any path. (Confirmed against fastify-cors's own usage docs
+// and a matching real-world report: fastify/fastify-http-proxy#309.) So CORS
+// is registered exactly once, at the top level, with origin decided
+// per-request via the documented callback form — not once per route group.
 
 const dashboardOrigins = process.env.ALLOWED_ORIGINS?.split(',') ?? ['http://localhost:3000'];
+
+// Paths that carry the httpOnly refresh cookie and must be locked to the
+// dashboard's known origin(s). Everything else (widget, agent, webhooks) is
+// open — see rationale above.
+const CREDENTIALED_PATH_PREFIXES = ['/api/v1/auth', '/api/v1/staff', '/api/v1/services'];
+
+function isCredentialedPath(url: string): boolean {
+  return CREDENTIALED_PATH_PREFIXES.some((prefix) => url.startsWith(prefix));
+}
+
+await server.register(cors, (instance) => {
+  return (req: FastifyRequest, callback: (error: Error | null, corsOptions?: FastifyCorsOptions) => void) => {
+    if (isCredentialedPath(req.url)) {
+      callback(null, { origin: dashboardOrigins, credentials: true });
+    } else {
+      callback(null, { origin: true, credentials: false });
+    }
+  };
+});
 
 await server.register(cookie);
 
@@ -56,29 +84,20 @@ await server.register(rateLimit, {
 await server.register(formbody);
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
-// Each plugin gets its own CORS registration — encapsulated per Fastify plugin
-// scope, so this doesn't leak between route groups.
 
-await server.register(async (instance) => {
-  await instance.register(cors, { origin: dashboardOrigins, credentials: true });
-  await instance.register(authRoutes,     { prefix: '/api/v1/auth' });
-  await instance.register(staffRoutes,    { prefix: '/api/v1/staff' });
-  await instance.register(serviceRoutes,  { prefix: '/api/v1/services' });
-});
+await server.register(authRoutes,     { prefix: '/api/v1/auth' });
+await server.register(staffRoutes,    { prefix: '/api/v1/staff' });
+await server.register(serviceRoutes,  { prefix: '/api/v1/services' });
 
-await server.register(async (instance) => {
-  // Public: embeddable widget + AI agent run on arbitrary third-party origins.
-  // Note: bookingRoutes also contains admin sub-routes (list/by-phone) gated
-  // by requireAuth — that's safe under open CORS because the access token is
-  // sent as an Authorization header (not a cookie), so there's no ambient
-  // credential for a third-party site to ride. A site without the bearer
-  // token simply gets a 401, regardless of origin.
-  await instance.register(cors, { origin: true, credentials: false });
-  await instance.register(businessRoutes, { prefix: '/api/v1/businesses' });
-  await instance.register(bookingRoutes,  { prefix: '/api/v1/bookings' });
-  await instance.register(slotRoutes,     { prefix: '/api/v1/slots' });
-  await instance.register(agentRoutes,    { prefix: '/api/v1/agent' });
-});
+// bookingRoutes also contains admin sub-routes (list/by-phone) gated by
+// requireAuth — safe under the open CORS policy above because the access
+// token is sent as an Authorization header (not a cookie), so there's no
+// ambient credential for a third-party site to ride. A site without the
+// bearer token simply gets a 401, regardless of origin.
+await server.register(businessRoutes, { prefix: '/api/v1/businesses' });
+await server.register(bookingRoutes,  { prefix: '/api/v1/bookings' });
+await server.register(slotRoutes,     { prefix: '/api/v1/slots' });
+await server.register(agentRoutes,    { prefix: '/api/v1/agent' });
 
 // Webhooks (Twilio) are server-to-server — no browser CORS involved at all.
 await server.register(webhookRoutes, { prefix: '/webhooks' });
