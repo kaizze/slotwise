@@ -74,7 +74,7 @@ export interface BusinessSettings {
   noShowThreshold: number;
 }
 
-
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
