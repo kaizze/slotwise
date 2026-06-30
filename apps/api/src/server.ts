@@ -1,4 +1,4 @@
-import Fastify, { type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import cors, { type FastifyCorsOptions } from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
@@ -57,7 +57,7 @@ function isCredentialedPath(url: string): boolean {
   return CREDENTIALED_PATH_PREFIXES.some((prefix) => url.startsWith(prefix));
 }
 
-await server.register(cors, (instance) => {
+await server.register(cors, (instance: FastifyInstance) => {
   return (req: FastifyRequest, callback: (error: Error | null, corsOptions?: FastifyCorsOptions) => void) => {
     if (isCredentialedPath(req.url)) {
       callback(null, { origin: dashboardOrigins, credentials: true });
