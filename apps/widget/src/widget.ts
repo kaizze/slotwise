@@ -49,7 +49,7 @@ export class SlotWiseWidget {
   private isOpen = false;
 
   constructor(config: SlotWiseWidgetConfig) {
-    const apiBaseUrl = config.apiBaseUrl ?? 'https://api.slotwise.app';
+    const apiBaseUrl = config.apiBaseUrl ?? 'https://app.coloredkidz.gr';
     this.api = new SlotWiseApiClient(apiBaseUrl, config.businessSlug);
 
     this.host = document.createElement('div');
