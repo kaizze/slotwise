@@ -100,21 +100,27 @@ function parseHourMinute(time: string): [number, number] {
 }
 
 function resolveDate(dateStr: string): string {
-  // Handle natural language dates
-  const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
   const lower = dateStr.toLowerCase().trim();
 
-  const dayIndex = days.indexOf(lower);
+  // English day names
+  const enDays = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+  // Greek day names (nominative and common spoken forms)
+  const elDays = ['κυριακή','δευτέρα','τρίτη','τετάρτη','πέμπτη','παρασκευή','σάββατο'];
+
+  const enIdx = enDays.indexOf(lower);
+  const elIdx = elDays.indexOf(lower);
+  const dayIndex = enIdx !== -1 ? enIdx : elIdx;
+
   if (dayIndex !== -1) {
-    let target = dayjs();
-    const today = target.day();
+    const today = dayjs().day();
     let diff = dayIndex - today;
     if (diff <= 0) diff += 7; // always next occurrence
-    return target.add(diff, 'day').format('YYYY-MM-DD');
+    return dayjs().add(diff, 'day').format('YYYY-MM-DD');
   }
 
-  if (lower === 'tomorrow') return dayjs().add(1, 'day').format('YYYY-MM-DD');
-  if (lower === 'today') return dayjs().format('YYYY-MM-DD');
+  // English and Greek for today/tomorrow
+  if (lower === 'tomorrow' || lower === 'αύριο') return dayjs().add(1, 'day').format('YYYY-MM-DD');
+  if (lower === 'today'    || lower === 'σήμερα') return dayjs().format('YYYY-MM-DD');
 
   // Assume it's already YYYY-MM-DD
   return dateStr;
