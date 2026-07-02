@@ -11,8 +11,9 @@ dayjs.extend(timezone);
 interface GetSlotsInput {
   businessId: string;
   serviceId: string;
-  date: string;         // YYYY-MM-DD or natural language like "Wednesday"
+  date: string;
   staffId?: string;
+  groupByStaff?: boolean; // when true, return the best slot per staff member
 }
 
 // ─── Row types ────────────────────────────────────────────────────────────────
@@ -265,7 +266,21 @@ export const SlotService = {
       }
     }
 
-    // Rank by optimizer score and return top results
-    return rankSlots(candidates, existingBookings);
+    // Rank all candidates by optimizer score
+    const ranked = rankSlots(candidates, existingBookings);
+
+    // When the caller wants to know "who is available", return the best slot
+    // per staff member rather than the global top 3 (which would all be the
+    // same person if one staff member gets consistently higher scores).
+    if (input.groupByStaff) {
+      const seen = new Set<string>();
+      return ranked.filter((slot) => {
+        if (seen.has(slot.staffId)) return false;
+        seen.add(slot.staffId);
+        return true;
+      });
+    }
+
+    return ranked;
   },
 };

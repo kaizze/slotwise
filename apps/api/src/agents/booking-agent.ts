@@ -37,9 +37,10 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
       type: 'object' as const,
       required: ['service_id'],
       properties: {
-        service_id:  { type: 'string' },
-        date:        { type: 'string', description: 'YYYY-MM-DD or natural e.g. "Wednesday", "tomorrow"' },
-        staff_id:    { type: 'string', description: 'Optional: pass the staff member\'s ID if the customer requested a specific person' },
+        service_id:     { type: 'string' },
+        date:           { type: 'string', description: 'YYYY-MM-DD or natural e.g. "Wednesday", "αύριο"' },
+        staff_id:       { type: 'string', description: 'Optional: pass staff ID if customer requested a specific person' },
+        group_by_staff: { type: 'boolean', description: 'Set to true when customer asks who is available — returns one best slot per staff member instead of top 3 overall' },
       },
     },
   },
@@ -116,6 +117,7 @@ YOUR JOB (follow this order strictly):
 2. Call get_services to get service IDs — ALWAYS do this, even if the service name seems obvious
 3. If the customer names a specific staff member, call get_staff with their name to get the staff ID
 4. Call get_available_slots with the service_id (and staff_id if known) — show max 3 slots
+   - If the customer asks "who is available" or wants to know their options across staff, set group_by_staff: true to get one best slot per person
 5. Collect name + phone (needed to create the booking)
 6. Confirm all details with the customer in one clear summary
 7. Call create_booking only after the customer explicitly confirms
@@ -150,9 +152,28 @@ export async function dispatchTool(
 
       case 'get_staff': {
         const staff = await StaffService.list(businessId);
+
+        // Transliterate Greek characters to Latin for fuzzy name matching —
+        // the customer types "Μαρία" but the DB stores "Maria Stavrakaki".
+        const greekToLatin: Record<string, string> = {
+          'α':'a','β':'b','γ':'g','δ':'d','ε':'e','ζ':'z','η':'i','θ':'th',
+          'ι':'i','κ':'k','λ':'l','μ':'m','ν':'n','ξ':'x','ο':'o','π':'p',
+          'ρ':'r','σ':'s','ς':'s','τ':'t','υ':'y','φ':'f','χ':'ch','ψ':'ps','ω':'o',
+          'ά':'a','έ':'e','ή':'i','ί':'i','ό':'o','ύ':'y','ώ':'o','ϊ':'i','ϋ':'y',
+          'ΐ':'i','ΰ':'y',
+        };
+
+        function transliterate(str: string): string {
+          return str.toLowerCase().split('').map((c) => greekToLatin[c] ?? c).join('');
+        }
+
         const filtered = toolInput.query
-          ? staff.filter((s) => s.name.toLowerCase().includes((toolInput.query as string).toLowerCase()))
+          ? (() => {
+              const q = transliterate(toolInput.query as string);
+              return staff.filter((s) => transliterate(s.name).includes(q));
+            })()
           : staff;
+
         return JSON.stringify(filtered.map((s) => ({ id: s.id, name: s.name })));
       }
 
@@ -186,6 +207,7 @@ export async function dispatchTool(
           serviceId,
           date: toolInput.date as string,
           staffId,
+          groupByStaff: toolInput.group_by_staff as boolean | undefined,
         });
         // Return top 3 scored slots only
         return JSON.stringify(slots.slice(0, 3));
