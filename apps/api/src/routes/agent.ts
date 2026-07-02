@@ -14,6 +14,10 @@ const chatBodySchema = z.object({
       content: z.string(),
     })
   ),
+  // Full Anthropic message history including tool calls/results from previous
+  // turns. If provided, this is used instead of messages — preserving the
+  // complete tool context so the agent doesn't forget what it already looked up.
+  history: z.array(z.any()).optional(),
   sessionId: z.string().optional(),
 });
 
@@ -35,11 +39,14 @@ export async function agentRoutes(fastify: FastifyInstance) {
 
       const systemPrompt = buildSystemPrompt(business);
 
-      // Convert our message format to Anthropic's format
-      const anthropicMessages: Anthropic.MessageParam[] = body.messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+      // If the client sends back the full history from a previous turn, use it
+      // directly — it contains the tool call/result pairs that give the agent
+      // memory of what it already looked up. Without this, the agent starts
+      // blind on every turn and hallucinates staff/services it already fetched.
+      // Fall back to converting the simple messages array for the first turn.
+      const anthropicMessages: Anthropic.MessageParam[] = body.history
+        ? (body.history as Anthropic.MessageParam[])
+        : body.messages.map((m) => ({ role: m.role, content: m.content }));
 
       const { reply: agentReply, messages: updatedMessages } = await runAgentLoop(
         anthropicMessages,
@@ -47,7 +54,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
         business.id
       );
 
-      // Convert back to our format for the client
+      // Simple text messages for display (backward compat)
       const responseMessages: AgentMessage[] = updatedMessages
         .filter((m: Anthropic.MessageParam) => typeof m.content === 'string')
         .map((m: Anthropic.MessageParam) => ({
@@ -55,9 +62,14 @@ export async function agentRoutes(fastify: FastifyInstance) {
           content: m.content as string,
         }));
 
+      responseMessages.push({ role: 'assistant', content: agentReply });
+
       return reply.send({
         reply: agentReply,
         messages: responseMessages,
+        // Full Anthropic history including tool calls — client must round-trip
+        // this as `history` on the next request to preserve agent context.
+        history: updatedMessages,
       });
     },
   });

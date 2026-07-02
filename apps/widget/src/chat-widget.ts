@@ -54,6 +54,9 @@ export class SlotWiseChatWidget {
   private config: SlotWiseChatConfig;
   private strings: typeof STRINGS['el'];
   private messages: AgentMessage[] = [];
+  // Full Anthropic message history including tool calls — opaque to the widget,
+  // just stored and sent back so the agent remembers what it already looked up.
+  private history: unknown[] = [];
   private root: ShadowRoot;
   private host: HTMLElement;
   private messagesEl: HTMLElement | null = null;
@@ -145,16 +148,22 @@ export class SlotWiseChatWidget {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: this.messages }),
+          body: JSON.stringify({
+            messages: this.messages,
+            // Round-trip the full Anthropic history so the agent remembers
+            // tool results from previous turns — without this it forgets
+            // every staff/service lookup on the next message.
+            ...(this.history.length > 0 ? { history: this.history } : {}),
+          }),
         }
       );
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-      const data = await response.json() as { reply: string; messages: AgentMessage[] };
+      const data = await response.json() as { reply: string; messages: AgentMessage[]; history: unknown[] };
 
-      // Server returns updated history including the assistant reply
       this.messages = data.messages;
+      this.history  = data.history ?? [];
       this.appendMessage('assistant', data.reply);
 
     } catch {
