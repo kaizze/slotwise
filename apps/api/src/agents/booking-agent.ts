@@ -157,11 +157,35 @@ export async function dispatchTool(
       }
 
       case 'get_available_slots': {
+        let serviceId = toolInput.service_id as string;
+
+        // Guard against the agent passing a service name instead of a UUID.
+        // This happens when the agent skips get_services and uses the name
+        // directly — we resolve it here rather than crashing with a DB error.
+        const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!UUID_PATTERN.test(serviceId)) {
+          const services = await SlotService.getServices(businessId, serviceId);
+          if (!services[0]) {
+            return JSON.stringify({ error: `No service found matching "${serviceId}". Call get_services first to see available services.` });
+          }
+          serviceId = services[0].id;
+        }
+
+        let staffId = toolInput.staff_id as string | undefined;
+        if (staffId) {
+          const UUID_PATTERN2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          if (!UUID_PATTERN2.test(staffId)) {
+            const allStaff = await StaffService.list(businessId);
+            const match = allStaff.find((s) => s.name.toLowerCase().includes(staffId!.toLowerCase()));
+            staffId = match?.id;
+          }
+        }
+
         const slots = await SlotService.getAvailableSlots({
           businessId,
-          serviceId: toolInput.service_id as string,
+          serviceId,
           date: toolInput.date as string,
-          staffId: toolInput.staff_id as string | undefined,
+          staffId,
         });
         // Return top 3 scored slots only
         return JSON.stringify(slots.slice(0, 3));
@@ -178,9 +202,19 @@ export async function dispatchTool(
       }
 
       case 'create_booking': {
+        let bookingServiceId = toolInput.service_id as string;
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!UUID_RE.test(bookingServiceId)) {
+          const services = await SlotService.getServices(businessId, bookingServiceId);
+          if (!services[0]) {
+            return JSON.stringify({ error: `No service found matching "${bookingServiceId}". Call get_services to get the correct service ID.` });
+          }
+          bookingServiceId = services[0].id;
+        }
+
         const booking = await BookingService.create({
           businessId,
-          serviceId: toolInput.service_id as string,
+          serviceId: bookingServiceId,
           staffId: toolInput.staff_id as string,
           slotDatetime: toolInput.slot_datetime as string,
           customerId: toolInput.customer_id as string,
