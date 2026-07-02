@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { BookingService } from '../services/booking.service.js';
 import { SlotService } from '../services/slot.service.js';
 import { CustomerService } from '../services/customer.service.js';
+import { StaffService } from '../services/staff.service.js';
 import type { Business } from '@slotwise/types';
 
 const client = new Anthropic();
@@ -20,6 +21,16 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_staff',
+    description: 'List active staff members for this business. Call this when the customer expresses a preference for a specific staff member by name, to resolve their name to an ID.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Optional name filter e.g. "Maria"' },
+      },
+    },
+  },
+  {
     name: 'get_available_slots',
     description: 'Get scored available appointment slots. Always call this before presenting options — never invent slots.',
     input_schema: {
@@ -28,7 +39,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
       properties: {
         service_id:  { type: 'string' },
         date:        { type: 'string', description: 'YYYY-MM-DD or natural e.g. "Wednesday", "tomorrow"' },
-        staff_id:    { type: 'string', description: 'Optional staff preference' },
+        staff_id:    { type: 'string', description: 'Optional: pass the staff member\'s ID if the customer requested a specific person' },
       },
     },
   },
@@ -95,11 +106,12 @@ LANGUAGE: Detect the customer's language and respond in the same language throug
 YOUR JOB:
 1. Understand what they want (service, date/time, staff preference)
 2. Call get_services to confirm the service exists and get its ID
-3. Call get_available_slots — show maximum 3 options, never a full grid
-4. Collect name + phone to identify the customer
-5. Summarise the booking details clearly and ask for confirmation
-6. Only after confirmation: call create_booking
-7. Confirm with the booking reference
+3. If the customer requests a specific staff member by name, call get_staff to resolve their name to an ID before calling get_available_slots
+4. Call get_available_slots — pass staff_id if the customer has a preference — show maximum 3 options, never a full grid
+5. Collect name + phone to identify the customer
+6. Summarise the booking details clearly and ask for confirmation
+7. Only after confirmation: call create_booking
+8. Confirm with the booking reference
 
 RULES:
 - Never invent or guess available slots — always call get_available_slots first
@@ -126,6 +138,14 @@ export async function dispatchTool(
       case 'get_services': {
         const services = await SlotService.getServices(businessId, toolInput.query as string);
         return JSON.stringify(services);
+      }
+
+      case 'get_staff': {
+        const staff = await StaffService.list(businessId);
+        const filtered = toolInput.query
+          ? staff.filter((s) => s.name.toLowerCase().includes((toolInput.query as string).toLowerCase()))
+          : staff;
+        return JSON.stringify(filtered.map((s) => ({ id: s.id, name: s.name })));
       }
 
       case 'get_available_slots': {
@@ -210,6 +230,13 @@ export async function runAgentLoop(
     if (response.stop_reason === 'end_turn') {
       const textBlock = response.content.find((b) => b.type === 'text');
       const reply = textBlock?.type === 'text' ? textBlock.text : '';
+      // The tool_use branch below already appends each intermediate assistant
+      // turn to `messages` — this final, plain-text turn must be appended
+      // here too, or every conversation's returned history is missing its
+      // own last reply. A client that round-trips `messages` back on the next
+      // request (the documented usage pattern) would silently lose the
+      // assistant's most recent message every single turn.
+      messages.push({ role: 'assistant', content: response.content });
       return { reply, messages };
     }
 

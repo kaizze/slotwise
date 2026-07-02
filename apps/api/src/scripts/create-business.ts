@@ -94,6 +94,16 @@ async function promptInteractive(): Promise<BusinessConfig> {
   const businessType = await promptWithDefault(rl, 'Type (hair_salon / beauty_salon / clinic / spa)', 'hair_salon');
   const timezone = await promptWithDefault(rl, 'Timezone', 'Europe/Athens');
 
+  // Validate timezone — try constructing an Intl.DateTimeFormat with it, which
+  // throws a RangeError if the IANA timezone name is invalid (e.g. "Y").
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: timezone });
+  } catch {
+    console.error(`\n✗ Invalid timezone: "${timezone}". Use an IANA name like "Europe/Athens" or "UTC".\n`);
+    rl.close();
+    process.exit(1);
+  }
+
   console.log('\n── Owner login ──────────────────────────\n');
   const ownerName     = await prompt(rl, 'Owner name: ');
   const ownerEmail    = await prompt(rl, 'Owner email: ');

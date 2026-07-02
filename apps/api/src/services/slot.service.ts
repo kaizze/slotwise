@@ -1,7 +1,12 @@
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc.js';
+import timezone from 'dayjs/plugin/timezone.js';
 import { db } from '../db/client.js';
 import { rankSlots } from '@slotwise/slot-optimizer';
 import type { Slot, Booking, WorkingHours } from '@slotwise/types';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 interface GetSlotsInput {
   businessId: string;
@@ -54,6 +59,7 @@ interface BookingRow {
 
 interface BusinessSettingsRow {
   settings: { bufferMinutes?: number } & Record<string, unknown>;
+  timezone: string;
 }
 
 function toBooking(row: BookingRow): Booking {
@@ -136,8 +142,6 @@ export const SlotService = {
 
   async getAvailableSlots(input: GetSlotsInput): Promise<Slot[]> {
     const resolvedDate = resolveDate(input.date);
-    const dayStart = dayjs(resolvedDate).startOf('day');
-    const dayEnd   = dayjs(resolvedDate).endOf('day');
 
     // Get service duration
     const service = await db.query<ServiceDurationRow>(
@@ -165,7 +169,24 @@ export const SlotService = {
     const staffResult = await db.query<StaffRow>(staffQuery, staffParams);
     const staffList = staffResult.rows;
 
-    // Get existing bookings for the day
+    // Get business settings and timezone together
+    const bizResult = await db.query<BusinessSettingsRow>(
+      'SELECT settings, timezone FROM businesses WHERE id = $1',
+      [input.businessId]
+    );
+    const settings = bizResult.rows[0]?.settings ?? {};
+    const tz = bizResult.rows[0]?.timezone ?? 'UTC';
+    const bufferMinutes: number = settings.bufferMinutes ?? 0;
+
+    // All time calculations must be done in the business's local timezone so
+    // that "09:00" in working_hours means 09:00 in Athens, not 09:00 UTC.
+    // dayjs.tz(date, tz) creates a timezone-aware object whose .toDate() method
+    // returns the correctly offset UTC Date for DB storage/comparison.
+    const dayStart = dayjs.tz(resolvedDate, tz).startOf('day');
+    const dayEnd   = dayjs.tz(resolvedDate, tz).endOf('day');
+
+    // Get existing bookings for the day (compare in UTC, which is what Postgres
+    // stores — but dayStart/dayEnd.toDate() are already correctly converted)
     const existingResult = await db.query<BookingRow>(`
       SELECT * FROM bookings
       WHERE business_id = $1
@@ -174,14 +195,6 @@ export const SlotService = {
     `, [input.businessId, dayStart.toDate(), dayEnd.toDate()]);
 
     const existingBookings: Booking[] = existingResult.rows.map(toBooking);
-
-    // Get business settings (buffer time)
-    const bizResult = await db.query<BusinessSettingsRow>(
-      'SELECT settings FROM businesses WHERE id = $1',
-      [input.businessId]
-    );
-    const settings = bizResult.rows[0]?.settings ?? {};
-    const bufferMinutes: number = settings.bufferMinutes ?? 0;
 
     // Generate candidate slots for each staff member
     const candidates: Array<Pick<Slot, 'startsAt' | 'endsAt' | 'staffId' | 'staffName'>> = [];
@@ -196,8 +209,10 @@ export const SlotService = {
       const [startH, startM] = parseHourMinute(workingHours.startTime);
       const [endH, endM] = parseHourMinute(workingHours.endTime);
 
-      let cursor = dayStart.hour(startH).minute(startM).second(0);
-      const workEnd = dayStart.hour(endH).minute(endM).second(0);
+      // Cursor and workEnd are in the business's local timezone — .hour() and
+      // .minute() set the clock time in that timezone, not UTC.
+      let cursor  = dayStart.hour(startH).minute(startM).second(0).millisecond(0);
+      const workEnd = dayStart.hour(endH).minute(endM).second(0).millisecond(0);
 
       // Get this staff's bookings for conflict detection
       const staffBookings = existingBookings.filter((b) => b.staffId === staff.id);
