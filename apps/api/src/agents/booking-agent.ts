@@ -1,20 +1,25 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { BookingService } from '../services/booking.service.js';
 import { SlotService } from '../services/slot.service.js';
 import { CustomerService } from '../services/customer.service.js';
 import { StaffService } from '../services/staff.service.js';
 import type { Business } from '@slotwise/types';
-
-const client = new Anthropic();
+import type { AgentTurnMessage, ToolDefinition } from './llm-types.js';
+import {
+  extractReplyText,
+  messageFromText,
+  normalizeHistory,
+  toDisplayMessages,
+} from './llm-types.js';
+import { getAgentLlmProvider } from './llm-provider.js';
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
-export const AGENT_TOOLS: Anthropic.Tool[] = [
+export const AGENT_TOOLS: ToolDefinition[] = [
   {
     name: 'get_services',
     description: 'List available services for this business. Call this first to match what the customer wants.',
-    input_schema: {
-      type: 'object' as const,
+    parameters: {
+      type: 'object',
       properties: {
         query: { type: 'string', description: 'Optional filter e.g. "haircut", "manicure"' },
       },
@@ -22,9 +27,9 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_staff',
-    description: 'List active staff members for this business. Call this when the customer expresses a preference for a specific staff member by name, to resolve their name to an ID.',
-    input_schema: {
-      type: 'object' as const,
+    description: 'List active staff members. Call when the customer names a specific person.',
+    parameters: {
+      type: 'object',
       properties: {
         query: { type: 'string', description: 'Optional name filter e.g. "Maria"' },
       },
@@ -32,51 +37,54 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_available_slots',
-    description: 'Get scored available appointment slots. Always call this before presenting options — never invent slots.',
-    input_schema: {
-      type: 'object' as const,
+    description: 'Get scored available appointment slots. Always call before presenting options — never invent slots.',
+    parameters: {
+      type: 'object',
       required: ['service_id'],
       properties: {
-        service_id:     { type: 'string' },
-        date:           { type: 'string', description: 'YYYY-MM-DD or natural e.g. "Wednesday", "αύριο"' },
-        staff_id:       { type: 'string', description: 'Optional: pass staff ID if customer requested a specific person' },
-        group_by_staff: { type: 'boolean', description: 'Set to true when customer asks who is available — returns one best slot per staff member instead of top 3 overall' },
+        service_id: { type: 'string' },
+        date: { type: 'string', description: 'YYYY-MM-DD or natural e.g. "Wednesday", "tomorrow"' },
+        staff_id: { type: 'string', description: 'Optional staff ID if customer requested a specific person' },
+        group_by_staff: {
+          type: 'boolean',
+          description: 'True when customer asks who is available — one best slot per staff member',
+        },
       },
     },
   },
   {
     name: 'find_or_create_customer',
     description: 'Look up customer by phone. Creates a new record if not found.',
-    input_schema: {
-      type: 'object' as const,
+    parameters: {
+      type: 'object',
       required: ['phone', 'name'],
       properties: {
         phone: { type: 'string' },
-        name:  { type: 'string' },
+        name: { type: 'string' },
         email: { type: 'string' },
       },
     },
   },
   {
     name: 'create_booking',
-    description: 'Create the appointment. Only call after confirming all details with the customer.',
-    input_schema: {
-      type: 'object' as const,
+    description: 'Create the appointment. Only call after the customer explicitly confirms all details.',
+    parameters: {
+      type: 'object',
       required: ['service_id', 'staff_id', 'slot_datetime', 'customer_id'],
       properties: {
-        service_id:    { type: 'string' },
-        staff_id:      { type: 'string' },
+        service_id: { type: 'string' },
+        staff_id: { type: 'string' },
         slot_datetime: { type: 'string', description: 'ISO 8601 datetime' },
-        customer_id:   { type: 'string' },
-        notes:         { type: 'string' },
+        customer_id: { type: 'string' },
+        notes: { type: 'string' },
       },
     },
   },
   {
     name: 'get_customer_bookings',
-    description: 'Look up existing and upcoming bookings for a customer.',
-    input_schema: {
-      type: 'object' as const,
+    description: 'Look up existing and upcoming bookings for a customer by phone.',
+    parameters: {
+      type: 'object',
       required: ['phone'],
       properties: {
         phone: { type: 'string' },
@@ -86,52 +94,49 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: 'cancel_booking',
     description: 'Cancel an existing booking by its reference.',
-    input_schema: {
-      type: 'object' as const,
+    parameters: {
+      type: 'object',
       required: ['booking_ref'],
       properties: {
         booking_ref: { type: 'string' },
-        reason:      { type: 'string' },
+        reason: { type: 'string' },
       },
     },
   },
 ];
 
-// ─── System prompt builder ────────────────────────────────────────────────────
+// ─── System prompt ────────────────────────────────────────────────────────────
 
 export function buildSystemPrompt(business: Pick<Business, 'name' | 'type' | 'locale' | 'settings'>): string {
-  const isGreek = business.locale === 'el';
+  const defaultLanguage = business.locale === 'el' ? 'Greek' : 'English';
 
-  return `You are the booking assistant for ${business.name}, a ${business.type}.
+  return `You are the booking assistant for ${business.name} (${business.type}).
 
-LANGUAGE:
-${isGreek
-  ? `The business is Greek. Respond in Greek by default unless the customer writes in another language.
-Greek tone: casual and warm, use "εσύ" (not "εσείς"), keep it short and natural like a text message.
-Good Greek example: "Γεια! Πότε θες να έρθεις και για ποια υπηρεσία;"
-Bad Greek example: "Καλημέρα σας! Πώς θα μπορούσα να σας εξυπηρετήσω σήμερα;"`
-  : `Respond in the customer's language.`}
+VOICE & LANGUAGE:
+- Reply in the same language the customer uses. If unclear, use ${defaultLanguage}.
+- Tone: warm, clear, and professional — like a helpful front-desk person, not a chatbot or stiff corporate bot.
+- Keep messages short: 1-3 sentences unless listing time options.
+- Use the customer's name once you know it.
+- Never mention internal IDs, UUIDs, or tool names.
 
-YOUR JOB (follow this order strictly):
-1. Understand what they want: service, date/time, staff preference (all optional at first — ask only what you need)
-2. Call get_services to get service IDs — ALWAYS do this, even if the service name seems obvious
-3. If the customer names a specific staff member, call get_staff with their name to get the staff ID
-4. Call get_available_slots with the service_id (and staff_id if known) — show max 3 slots
-   - If the customer asks "who is available" or wants to know their options across staff, set group_by_staff: true to get one best slot per person
-5. Collect name + phone (needed to create the booking)
-6. Confirm all details with the customer in one clear summary
-7. Call create_booking only after the customer explicitly confirms
-8. Give them the booking reference
+BOOKING FLOW (follow in order):
+1. Understand what they need: service, date/time, staff preference (ask only what's missing).
+2. Call get_services to resolve service names to IDs — always, even if the service seems obvious.
+3. If they name a staff member, call get_staff to resolve the name.
+4. Call get_available_slots — show at most 3 options, formatted clearly (day, time, staff name).
+   - If they ask who is available, use group_by_staff: true.
+5. Collect name and phone before booking.
+6. Summarize all details and wait for explicit confirmation ("yes", "confirm", etc.).
+7. Call create_booking only after they confirm.
+8. End with the booking reference and a brief thank-you.
 
-CRITICAL RULES:
-- NEVER say a service or staff member doesn't exist without calling get_services or get_staff first to check — not even if you think you already know
-- In every NEW message from the customer that asks about services or staff, call the tools again — never rely on what you think you learned in previous turns
-- NEVER invent slots — always call get_available_slots
-- If the customer asks about multiple bookings (e.g. haircut with Maria + blow dry with Eleni), handle ONE at a time — complete the first booking, then offer to book the second
-- Staff names in Greek may be informal (e.g. "Μαρία" = "Maria Stavrakaki") — use get_staff with the first name to find the full match
-- Keep each message short — 2-4 lines maximum unless showing slot options
-- Do not mention IDs to the customer
-- If you're unsure about a date ("αύριο", "την Παρασκευή"), confirm it before searching slots`;
+RULES:
+- Never claim a service or staff member doesn't exist without calling get_services or get_staff first.
+- On each new customer question about services/staff/slots, call the tools again — don't rely on memory alone.
+- Never invent availability — always use get_available_slots.
+- Multiple services: book one appointment at a time; offer the next after the first is confirmed.
+- Ambiguous dates ("tomorrow", "Friday", "next week"): confirm the exact date before searching slots.
+- If a tool returns an error, explain simply and ask for the missing info — don't expose raw errors.`;
 }
 
 // ─── Tool dispatcher ──────────────────────────────────────────────────────────
@@ -153,8 +158,6 @@ export async function dispatchTool(
       case 'get_staff': {
         const staff = await StaffService.list(businessId);
 
-        // Transliterate Greek characters to Latin for fuzzy name matching —
-        // the customer types "Μαρία" but the DB stores "Maria Stavrakaki".
         const greekToLatin: Record<string, string> = {
           'α':'a','β':'b','γ':'g','δ':'d','ε':'e','ζ':'z','η':'i','θ':'th',
           'ι':'i','κ':'k','λ':'l','μ':'m','ν':'n','ξ':'x','ο':'o','π':'p',
@@ -180,22 +183,18 @@ export async function dispatchTool(
       case 'get_available_slots': {
         let serviceId = toolInput.service_id as string;
 
-        // Guard against the agent passing a service name instead of a UUID.
-        // This happens when the agent skips get_services and uses the name
-        // directly — we resolve it here rather than crashing with a DB error.
         const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         if (!UUID_PATTERN.test(serviceId)) {
           const services = await SlotService.getServices(businessId, serviceId);
           if (!services[0]) {
-            return JSON.stringify({ error: `No service found matching "${serviceId}". Call get_services first to see available services.` });
+            return JSON.stringify({ error: `No service found matching "${serviceId}". Call get_services first.` });
           }
           serviceId = services[0].id;
         }
 
         let staffId = toolInput.staff_id as string | undefined;
         if (staffId) {
-          const UUID_PATTERN2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-          if (!UUID_PATTERN2.test(staffId)) {
+          if (!UUID_PATTERN.test(staffId)) {
             const allStaff = await StaffService.list(businessId);
             const match = allStaff.find((s) => s.name.toLowerCase().includes(staffId!.toLowerCase()));
             staffId = match?.id;
@@ -209,7 +208,6 @@ export async function dispatchTool(
           staffId,
           groupByStaff: toolInput.group_by_staff as boolean | undefined,
         });
-        // Return top 3 scored slots only
         return JSON.stringify(slots.slice(0, 3));
       }
 
@@ -229,7 +227,7 @@ export async function dispatchTool(
         if (!UUID_RE.test(bookingServiceId)) {
           const services = await SlotService.getServices(businessId, bookingServiceId);
           if (!services[0]) {
-            return JSON.stringify({ error: `No service found matching "${bookingServiceId}". Call get_services to get the correct service ID.` });
+            return JSON.stringify({ error: `No service found matching "${bookingServiceId}". Call get_services first.` });
           }
           bookingServiceId = services[0].id;
         }
@@ -272,78 +270,62 @@ export async function dispatchTool(
 // ─── Agentic loop ─────────────────────────────────────────────────────────────
 
 export async function runAgentLoop(
-  messages: Anthropic.MessageParam[],
+  messages: AgentTurnMessage[],
   systemPrompt: string,
   businessId: string
-): Promise<{ reply: string; messages: Anthropic.MessageParam[] }> {
-  const MAX_ITERATIONS = 10; // safety ceiling — prevents runaway tool-call loops
-
+): Promise<{ reply: string; messages: AgentTurnMessage[] }> {
+  const provider = getAgentLlmProvider();
+  const MAX_ITERATIONS = 10;
   let iterations = 0;
 
   while (iterations < MAX_ITERATIONS) {
     iterations++;
 
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5',  // fast + cheap for most turns
-      max_tokens: 1024,
-      system: systemPrompt,
+    const response = await provider.complete({
+      systemPrompt,
       messages,
       tools: AGENT_TOOLS,
     });
 
-    if (response.stop_reason === 'end_turn') {
-      const textBlock = response.content.find((b) => b.type === 'text');
-      const reply = textBlock?.type === 'text' ? textBlock.text : '';
-      // The tool_use branch below already appends each intermediate assistant
-      // turn to `messages` — this final, plain-text turn must be appended
-      // here too, or every conversation's returned history is missing its
-      // own last reply. A client that round-trips `messages` back on the next
-      // request (the documented usage pattern) would silently lose the
-      // assistant's most recent message every single turn.
-      messages.push({ role: 'assistant', content: response.content });
+    messages.push({ role: 'assistant', parts: response.parts });
+
+    if (response.stopReason === 'end_turn') {
+      const reply = extractReplyText(response.parts);
       return { reply, messages };
     }
 
-    if (response.stop_reason === 'tool_use') {
-      // Append Claude's response to history
-      messages.push({ role: 'assistant', content: response.content });
+    const toolCalls = response.parts.filter(
+      (p): p is Extract<typeof p, { kind: 'tool_call' }> => p.kind === 'tool_call'
+    );
 
-      // Process all tool calls in this response
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    const toolResults = await Promise.all(
+      toolCalls.map(async (call) => ({
+        kind: 'tool_result' as const,
+        id: call.id,
+        name: call.name,
+        result: await dispatchTool(call.name, call.args, { businessId }),
+      }))
+    );
 
-      for (const block of response.content) {
-        if (block.type !== 'tool_use') continue;
-
-        const result = await dispatchTool(
-          block.name,
-          block.input as Record<string, unknown>,
-          { businessId }
-        );
-
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: block.id,
-          content: result,
-        });
-      }
-
-      // Append tool results and loop
-      messages.push({ role: 'user', content: toolResults });
-      continue;
-    }
-
-    // Unexpected stop reason (e.g. max_tokens cutoff)
-    break;
+    messages.push({ role: 'user', parts: toolResults });
   }
 
   return {
-    reply: 'I encountered an issue processing your request. Please try again.',
+    reply: 'Sorry, I had trouble completing that request. Please try again.',
     messages,
   };
 }
 
-// ─── Convenience: run a single text-in, text-out turn ────────────────────────
-// Used by webhook channels (WhatsApp/SMS) that don't carry rich message arrays.
+/** Build canonical history from simple text messages. */
+export function messagesToHistory(
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>
+): AgentTurnMessage[] {
+  return messages.map((m) => messageFromText(m.role, m.content));
+}
+
+export { normalizeHistory, toDisplayMessages };
+
+// ─── Convenience: text-only channels (WhatsApp / SMS) ───────────────────────
 
 export async function runAgentTurn(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
@@ -352,16 +334,12 @@ export async function runAgentTurn(
 ): Promise<{ reply: string; history: Array<{ role: 'user' | 'assistant'; content: string }> }> {
   const systemPrompt = buildSystemPrompt(business);
 
-  const anthropicMessages: Anthropic.MessageParam[] = [
-    ...history.map((m) => ({ role: m.role, content: m.content })),
-    { role: 'user' as const, content: userMessage },
+  const canonicalHistory: AgentTurnMessage[] = [
+    ...history.map((m) => messageFromText(m.role, m.content)),
+    messageFromText('user', userMessage),
   ];
 
-  const { reply, messages } = await runAgentLoop(anthropicMessages, systemPrompt, business.id);
+  const { reply, messages } = await runAgentLoop(canonicalHistory, systemPrompt, business.id);
 
-  const updatedHistory = messages
-    .filter((m) => typeof m.content === 'string')
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content as string }));
-
-  return { reply, history: updatedHistory };
+  return { reply, history: toDisplayMessages(messages) };
 }

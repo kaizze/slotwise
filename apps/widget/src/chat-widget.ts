@@ -18,19 +18,19 @@ export interface SlotWiseChatConfig {
 // ─── i18n ─────────────────────────────────────────────────────────────────────
 
 const STRINGS = {
-  el: {
-    placeholder: 'Γράψτε το μήνυμά σας...',
-    send: 'Αποστολή',
-    greeting: 'Γεια σας! Πώς μπορώ να σας βοηθήσω;\n\nΜπορείτε να μου πείτε για παράδειγμα:\n• «Θέλω να κλείσω ραντεβού για κούρεμα την Παρασκευή»\n• «Ποιες θέσεις έχετε διαθέσιμες αυτή την εβδομάδα;»',
-    error: 'Κάτι πήγε στραβά. Παρακαλώ δοκιμάστε ξανά.',
-    poweredBy: 'Με τεχνολογία SlotWise AI',
-  },
   en: {
     placeholder: 'Type your message...',
     send: 'Send',
-    greeting: 'Hello! How can I help you?\n\nYou can say things like:\n• "I want to book a haircut this Friday"\n• "What slots are available this week?"',
+    greeting: 'Hi! I can help you book an appointment.\n\nFor example:\n• "I\'d like a haircut this Friday"\n• "What times are available this week?"',
     error: 'Something went wrong. Please try again.',
-    poweredBy: 'Powered by SlotWise AI',
+    poweredBy: 'Powered by SlotWise',
+  },
+  el: {
+    placeholder: 'Γράψτε το μήνυμά σας...',
+    send: 'Αποστολή',
+    greeting: 'Γεια σας! Μπορώ να σας βοηθήσω να κλείσετε ραντεβού.\n\nΓια παράδειγμα:\n• «Θα ήθελα κούρεμα την Παρασκευή»\n• «Ποιες ώρες έχετε διαθέσιμες αυτή την εβδομάδα;»',
+    error: 'Κάτι πήγε στραβά. Παρακαλώ δοκιμάστε ξανά.',
+    poweredBy: 'Powered by SlotWise',
   },
 } as const;
 
@@ -54,7 +54,7 @@ export class SlotWiseChatWidget {
   private config: SlotWiseChatConfig;
   private strings: typeof STRINGS['el'];
   private messages: AgentMessage[] = [];
-  // Full Anthropic message history including tool calls — opaque to the widget,
+  // Full agent history including tool calls — opaque to the widget,
   // just stored and sent back so the agent remembers what it already looked up.
   private history: unknown[] = [];
   private root: ShadowRoot;
@@ -66,7 +66,7 @@ export class SlotWiseChatWidget {
 
   constructor(config: SlotWiseChatConfig) {
     this.config = config;
-    this.strings = STRINGS[config.lang ?? 'el'];
+    this.strings = STRINGS[config.lang ?? 'en'];
 
     const target = config.targetId ? document.getElementById(config.targetId) : null;
 
@@ -150,9 +150,7 @@ export class SlotWiseChatWidget {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             messages: this.messages,
-            // Round-trip the full Anthropic history so the agent remembers
-            // tool results from previous turns — without this it forgets
-            // every staff/service lookup on the next message.
+            // Round-trip full agent history so tool context survives across turns
             ...(this.history.length > 0 ? { history: this.history } : {}),
           }),
         }
