@@ -130,6 +130,20 @@ function resolveDate(dateStr: string): string {
 export const SlotService = {
 
   async getServices(businessId: string, query?: string) {
+    // Transliterate Greek query to Latin for matching — service names are stored
+    // in Latin (e.g. "Haircut") but customers type in Greek (e.g. "κούρεμα").
+    const greekToLatin: Record<string, string> = {
+      'α':'a','β':'b','γ':'g','δ':'d','ε':'e','ζ':'z','η':'i','θ':'th',
+      'ι':'i','κ':'k','λ':'l','μ':'m','ν':'n','ξ':'x','ο':'o','π':'p',
+      'ρ':'r','σ':'s','ς':'s','τ':'t','υ':'y','φ':'f','χ':'ch','ψ':'ps','ω':'o',
+      'ά':'a','έ':'e','ή':'i','ί':'i','ό':'o','ύ':'y','ώ':'o','ϊ':'i','ϋ':'y',
+      'ΐ':'i','ΰ':'y',
+    };
+
+    function transliterate(str: string): string {
+      return str.toLowerCase().split('').map((c) => greekToLatin[c] ?? c).join('');
+    }
+
     let sql = `
       SELECT id, name, description, duration_minutes, price, currency, color
       FROM services
@@ -138,8 +152,10 @@ export const SlotService = {
     const params: Array<string> = [businessId];
 
     if (query) {
-      sql += ` AND name ILIKE $2`;
+      const latinQuery = transliterate(query);
+      sql += ` AND (name ILIKE $2 OR name ILIKE $3)`;
       params.push(`%${query}%`);
+      params.push(`%${latinQuery}%`);
     }
 
     sql += ' ORDER BY name ASC';
