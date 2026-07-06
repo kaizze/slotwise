@@ -139,10 +139,6 @@ export class SlotWiseChatWidget {
     this.inputEl.value = '';
     this.appendMessage('user', text);
     this.messages.push({ role: 'user', content: text });
-    // Also append to the Anthropic history so the API receives the new user
-    // message as part of the full context — without this, history ends with
-    // the previous assistant turn and the model has nothing new to respond to.
-    this.history.push({ role: 'user', content: text });
     this.setThinking(true);
 
     try {

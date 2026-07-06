@@ -39,14 +39,27 @@ export async function agentRoutes(fastify: FastifyInstance) {
 
       const systemPrompt = buildSystemPrompt(business);
 
-      // If the client sends back the full history from a previous turn, use it
-      // directly — it contains the tool call/result pairs that give the agent
-      // memory of what it already looked up. Without this, the agent starts
-      // blind on every turn and hallucinates staff/services it already fetched.
-      // Fall back to converting the simple messages array for the first turn.
-      const anthropicMessages: Anthropic.MessageParam[] = body.history
-        ? (body.history as Anthropic.MessageParam[])
-        : body.messages.map((m) => ({ role: m.role, content: m.content }));
+      let anthropicMessages: Anthropic.MessageParam[];
+
+      if (body.history && body.history.length > 0) {
+        anthropicMessages = body.history as Anthropic.MessageParam[];
+
+        // The history from the previous turn ends with the assistant's last reply.
+        // We need to append the new user message — get it from the messages array
+        // (the last user message is what the customer just sent).
+        const lastUserMessage = [...body.messages].reverse().find((m) => m.role === 'user');
+        const lastHistoryMsg = anthropicMessages[anthropicMessages.length - 1];
+
+        // Only append if the history doesn't already end with this user message
+        if (lastUserMessage && lastHistoryMsg?.role !== 'user') {
+          anthropicMessages = [
+            ...anthropicMessages,
+            { role: 'user' as const, content: lastUserMessage.content },
+          ];
+        }
+      } else {
+        anthropicMessages = body.messages.map((m) => ({ role: m.role, content: m.content }));
+      }
 
       const { reply: agentReply, messages: updatedMessages } = await runAgentLoop(
         anthropicMessages,
