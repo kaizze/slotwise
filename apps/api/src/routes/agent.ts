@@ -30,6 +30,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
   fastify.post('/:businessSlug/chat', {
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     handler: async (request, reply) => {
+      try {
       const { businessSlug } = request.params as { businessSlug: string };
       const body = chatBodySchema.parse(request.body);
 
@@ -76,6 +77,22 @@ export async function agentRoutes(fastify: FastifyInstance) {
         messages: toDisplayMessages(updatedMessages),
         history: updatedMessages,
       });
+      } catch (err) {
+      request.log.error({ err }, 'Agent chat failed');
+
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      if (message.includes('Missing required env var')) {
+        return reply.status(503).send({
+          error: 'agent_not_configured',
+          message: 'AI agent is not configured on the server (missing API key).',
+        });
+      }
+
+      return reply.status(500).send({
+        error: 'agent_error',
+        message: 'The booking assistant failed. Please try again in a moment.',
+      });
+      }
     },
   });
 }

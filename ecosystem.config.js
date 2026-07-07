@@ -18,6 +18,11 @@ module.exports = {
       name: 'slotwise-api',
       cwd: './apps/api',
       script: 'dist/server.js',
+      interpreter: 'node',
+      // Load apps/api/.env — PM2 does not read .env on its own. Without this,
+      // OPENAI_API_KEY and DATABASE_URL are missing and the process crashes or
+      // returns 502 via nginx.
+      node_args: '--env-file=.env',
       instances: 1,
       exec_mode: 'fork',
       env: {

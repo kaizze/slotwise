@@ -51,8 +51,15 @@ function defaultModel(provider: AgentLlmProviderName): string {
 // ─── OpenAI ───────────────────────────────────────────────────────────────────
 
 class OpenAiProvider implements LlmProvider {
-  private client = new OpenAI({ apiKey: requireEnv('OPENAI_API_KEY') });
+  private client: OpenAI | null = null;
   private model = defaultModel('openai');
+
+  private getClient(): OpenAI {
+    if (!this.client) {
+      this.client = new OpenAI({ apiKey: requireEnv('OPENAI_API_KEY') });
+    }
+    return this.client;
+  }
 
   async complete(input: {
     systemPrompt: string;
@@ -64,7 +71,7 @@ class OpenAiProvider implements LlmProvider {
       ...toOpenAiMessages(input.messages),
     ];
 
-    const response = await this.client.chat.completions.create({
+    const response = await this.getClient().chat.completions.create({
       model: this.model,
       max_tokens: 1024,
       messages: openAiMessages,
@@ -155,15 +162,22 @@ function fromOpenAiAssistantMessage(
 // ─── Gemini ───────────────────────────────────────────────────────────────────
 
 class GeminiProvider implements LlmProvider {
-  private client = new GoogleGenerativeAI(requireEnv('GOOGLE_API_KEY'));
+  private client: GoogleGenerativeAI | null = null;
   private model = defaultModel('gemini');
+
+  private getClient(): GoogleGenerativeAI {
+    if (!this.client) {
+      this.client = new GoogleGenerativeAI(requireEnv('GOOGLE_API_KEY'));
+    }
+    return this.client;
+  }
 
   async complete(input: {
     systemPrompt: string;
     messages: AgentTurnMessage[];
     tools: ToolDefinition[];
   }): Promise<LlmCompletionResult> {
-    const model = this.client.getGenerativeModel({
+    const model = this.getClient().getGenerativeModel({
       model: this.model,
       systemInstruction: input.systemPrompt,
       tools: [{ functionDeclarations: input.tools.map(toGeminiTool) }],
