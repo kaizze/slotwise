@@ -1,5 +1,5 @@
 import { BookingService } from '../services/booking.service.js';
-import { SlotService, resolveBookingDate } from '../services/slot.service.js';
+import { SlotService, resolveBookingDate, resolveTimeOfDay } from '../services/slot.service.js';
 import { CustomerService } from '../services/customer.service.js';
 import { StaffService } from '../services/staff.service.js';
 import { BusinessService } from '../services/business.service.js';
@@ -44,7 +44,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'get_available_slots',
-    description: 'Get scored available appointment slots. Always call before presenting options — never invent slots.',
+    description: 'Get available appointment slots for a date. Returns real times from the calendar — never invent slots.',
     parameters: {
       type: 'object',
       required: ['service_id'],
@@ -52,9 +52,14 @@ export const AGENT_TOOLS: ToolDefinition[] = [
         service_id: { type: 'string' },
         date: {
           type: 'string',
-          description: 'Use natural language: "tomorrow", "αύριο", "today", day names — OR YYYY-MM-DD from CURRENT DATE CONTEXT. Never guess dates from memory.',
+          description: 'Use natural language: "tomorrow", "αύριο", "today", day names — OR YYYY-MM-DD from CURRENT DATE CONTEXT.',
         },
         staff_id: { type: 'string', description: 'Optional staff ID if customer requested a specific person' },
+        time_preference: {
+          type: 'string',
+          enum: ['morning', 'afternoon', 'evening'],
+          description: 'Filter to part of day when customer asks — morning (9-13), afternoon (13-17), evening (17+). Greek: πρωί / απόγευμα / βράδυ.',
+        },
         group_by_staff: {
           type: 'boolean',
           description: 'True when customer asks who is available — one best slot per staff member',
@@ -139,9 +144,9 @@ VOICE & LANGUAGE:
 BOOKING FLOW (follow in order):
 1. When the customer mentions ANY service (even vaguely like "κουρεματάκι"), call get_services in the SAME turn — do not ask for date/time first.
 2. If they name a staff member, call get_staff to resolve the name.
-3. Call get_available_slots with natural-language dates ("αύριο", "tomorrow") — never a made-up YYYY-MM-DD.
-   - Show at most 3 options with day, time, and staff name.
-   - If they ask who is available, use group_by_staff: true.
+3. Call get_available_slots with natural-language dates ("αύριο", "tomorrow").
+   - If the customer wants a specific part of the day, pass time_preference: morning / afternoon / evening.
+   - Present the times returned — up to 5 options spread across the day.
 4. Collect name and phone before booking.
 5. Confirm all details, then call create_booking only after explicit confirmation.
 
@@ -219,6 +224,7 @@ export async function dispatchTool(
         const tz = business?.timezone ?? 'UTC';
         const dateInput = (toolInput.date as string | undefined) ?? 'today';
         const resolvedDate = resolveBookingDate(dateInput, tz);
+        const timeOfDay = resolveTimeOfDay(toolInput.time_preference as string | undefined);
 
         const slots = await SlotService.getAvailableSlots({
           businessId,
@@ -226,17 +232,22 @@ export async function dispatchTool(
           date: dateInput,
           staffId,
           groupByStaff: toolInput.group_by_staff as boolean | undefined,
+          timeOfDay,
+          presentation: 'customer',
+          limit: 5,
         });
 
         return JSON.stringify({
           date_requested: dateInput,
           date_searched: resolvedDate,
-          slots: slots.slice(0, 3).map((s) => ({
+          time_filter: timeOfDay ?? 'all day',
+          total_matching: slots.length,
+          slots: slots.map((s) => ({
             starts_at: s.startsAt,
+            local_time: dayjs(s.startsAt).tz(tz).format('HH:mm'),
             ends_at: s.endsAt,
             staff_id: s.staffId,
             staff_name: s.staffName,
-            score: s.score,
           })),
         });
       }

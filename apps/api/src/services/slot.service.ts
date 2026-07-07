@@ -13,8 +13,16 @@ interface GetSlotsInput {
   serviceId: string;
   date: string;
   staffId?: string;
-  groupByStaff?: boolean; // when true, return the best slot per staff member
+  groupByStaff?: boolean;
+  /** Filter to part of day — morning / afternoon / evening */
+  timeOfDay?: TimeOfDay;
+  /** Customer-facing: spread slots across the day. Optimizer: sort by score (default). */
+  presentation?: 'customer' | 'optimizer';
+  /** Max slots to return (customer presentation only). Default 5 for agent. */
+  limit?: number;
 }
+
+export type TimeOfDay = 'morning' | 'afternoon' | 'evening';
 
 // ─── Row types ────────────────────────────────────────────────────────────────
 // Same rationale as booking.service.ts — explicit shapes for what's actually
@@ -184,6 +192,65 @@ function normalizeServiceQuery(query: string): string {
 
 export function resolveBookingDate(dateStr: string, tz = 'UTC'): string {
   return resolveDate(dateStr, tz);
+}
+
+/** Normalize agent/customer time preference (Greek + English). */
+export function resolveTimeOfDay(value: string | undefined): TimeOfDay | undefined {
+  if (!value) return undefined;
+  const lower = value.toLowerCase().trim();
+
+  if (['morning', 'πρωί', 'πρωι', 'am'].includes(lower)) return 'morning';
+  if (['afternoon', 'απόγευμα', 'απογευμα', 'μεσημέρι', 'μεσημερι', 'pm'].includes(lower)) {
+    return 'afternoon';
+  }
+  if (['evening', 'βράδυ', 'βραδυ', 'night'].includes(lower)) return 'evening';
+  return undefined;
+}
+
+function slotHourInTz(startsAt: Date, tz: string): number {
+  return dayjs(startsAt).tz(tz).hour();
+}
+
+function matchesTimeOfDay(startsAt: Date, tz: string, timeOfDay: TimeOfDay): boolean {
+  const hour = slotHourInTz(startsAt, tz);
+  switch (timeOfDay) {
+    case 'morning':
+      return hour >= 9 && hour < 13;
+    case 'afternoon':
+      return hour >= 13 && hour < 17;
+    case 'evening':
+      return hour >= 17;
+  }
+}
+
+/** Pick slots spread across the day for customer display — not just top optimizer scores. */
+function selectCustomerDisplaySlots(slots: Slot[], tz: string, limit: number): Slot[] {
+  if (slots.length <= limit) {
+    return [...slots].sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+  }
+
+  const chronological = [...slots].sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+  const morning = chronological.filter((s) => matchesTimeOfDay(s.startsAt, tz, 'morning'));
+  const afternoon = chronological.filter((s) => matchesTimeOfDay(s.startsAt, tz, 'afternoon'));
+  const evening = chronological.filter((s) => matchesTimeOfDay(s.startsAt, tz, 'evening'));
+
+  const picked: Slot[] = [];
+  const tryPick = (bucket: Slot[]) => {
+    if (bucket[0] && picked.length < limit && !picked.includes(bucket[0])) {
+      picked.push(bucket[0]);
+    }
+  };
+
+  tryPick(morning);
+  tryPick(afternoon);
+  tryPick(evening);
+
+  for (const slot of chronological) {
+    if (picked.length >= limit) break;
+    if (!picked.includes(slot)) picked.push(slot);
+  }
+
+  return picked.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
 }
 
 export const SlotService = {
@@ -356,18 +423,30 @@ export const SlotService = {
     }
 
     // Rank all candidates by optimizer score
-    const ranked = rankSlots(candidates, existingBookings);
+    let ranked = rankSlots(candidates, existingBookings);
 
-    // When the caller wants to know "who is available", return the best slot
-    // per staff member rather than the global top 3 (which would all be the
-    // same person if one staff member gets consistently higher scores).
     if (input.groupByStaff) {
       const seen = new Set<string>();
-      return ranked.filter((slot) => {
+      ranked = ranked.filter((slot) => {
         if (seen.has(slot.staffId)) return false;
         seen.add(slot.staffId);
         return true;
       });
+    }
+
+    if (input.timeOfDay) {
+      ranked = ranked.filter((s) => matchesTimeOfDay(s.startsAt, tz, input.timeOfDay!));
+    }
+
+    if (input.presentation === 'customer') {
+      if (input.limit && input.limit > 0) {
+        return selectCustomerDisplaySlots(ranked, tz, input.limit);
+      }
+      return [...ranked].sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+    }
+
+    if (input.limit && input.limit > 0) {
+      return ranked.slice(0, input.limit);
     }
 
     return ranked;

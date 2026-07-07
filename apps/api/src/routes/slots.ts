@@ -25,6 +25,7 @@ export async function slotRoutes(fastify: FastifyInstance) {
         serviceId: query.serviceId,
         date: query.date,
         staffId: query.staffId,
+        presentation: 'customer',
       });
 
       return reply.send({ data: slots });
