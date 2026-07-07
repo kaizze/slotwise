@@ -100,31 +100,90 @@ function parseHourMinute(time: string): [number, number] {
   return [hour, minute];
 }
 
-function resolveDate(dateStr: string): string {
-  const lower = dateStr.toLowerCase().trim();
+function resolveDate(dateStr: string, tz = 'UTC'): string {
+  const now = dayjs().tz(tz);
+  const lower = dateStr
+    .toLowerCase()
+    .trim()
+    .replace(/[?.!,;:'"]+$/g, '')
+    .replace(/^[?.!,;:'"]+/g, '');
 
   // English day names
   const enDays = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
   // Greek day names (nominative and common spoken forms)
-  const elDays = ['κυριακή','δευτέρα','τρίτη','τετάρτη','πέμπτη','παρασκευή','σάββατο'];
+  const elDays = ['κυριακή','κυριακη','δευτέρα','δευτερα','τρίτη','τριτη','τετάρτη','τεταρτη','πέμπτη','πεμπτη','παρασκευή','παρασκευη','σάββατο','σαββατο'];
 
   const enIdx = enDays.indexOf(lower);
   const elIdx = elDays.indexOf(lower);
   const dayIndex = enIdx !== -1 ? enIdx : elIdx;
 
   if (dayIndex !== -1) {
-    const today = dayjs().day();
+    const today = now.day();
     let diff = dayIndex - today;
-    if (diff <= 0) diff += 7; // always next occurrence
-    return dayjs().add(diff, 'day').format('YYYY-MM-DD');
+    if (diff <= 0) diff += 7;
+    return now.add(diff, 'day').format('YYYY-MM-DD');
   }
 
-  // English and Greek for today/tomorrow
-  if (lower === 'tomorrow' || lower === 'αύριο') return dayjs().add(1, 'day').format('YYYY-MM-DD');
-  if (lower === 'today'    || lower === 'σήμερα') return dayjs().format('YYYY-MM-DD');
+  if (lower === 'tomorrow' || lower === 'αύριο' || lower === 'αυριο') {
+    return now.add(1, 'day').format('YYYY-MM-DD');
+  }
+  if (lower === 'today' || lower === 'σήμερα' || lower === 'σημερα') {
+    return now.format('YYYY-MM-DD');
+  }
 
-  // Assume it's already YYYY-MM-DD
+  // Natural-language fragments embedded in longer phrases
+  if (lower.includes('αύριο') || lower.includes('αυριο') || lower.includes('tomorrow')) {
+    return now.add(1, 'day').format('YYYY-MM-DD');
+  }
+  if (lower.includes('σήμερα') || lower.includes('σημερα') || lower.includes('today')) {
+    return now.format('YYYY-MM-DD');
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(lower)) {
+    const parsed = dayjs.tz(lower, tz);
+    if (!parsed.isValid()) return now.format('YYYY-MM-DD');
+
+    // LLMs sometimes hallucinate old training-data dates — auto-correct obvious mistakes
+    if (parsed.isBefore(now.startOf('day'))) {
+      const daysAgo = now.startOf('day').diff(parsed.startOf('day'), 'day');
+      if (daysAgo > 7) {
+        return now.add(1, 'day').format('YYYY-MM-DD');
+      }
+    }
+    return lower;
+  }
+
   return dateStr;
+}
+
+// Greek / informal terms → English service name fragments stored in the DB
+const SERVICE_QUERY_ALIASES: Record<string, string> = {
+  'κούρεμα': 'haircut',
+  'κουρεμα': 'haircut',
+  'κουρεματάκι': 'haircut',
+  'κουρεματακι': 'haircut',
+  'κομμωτική': 'haircut',
+  'κομμωτικη': 'haircut',
+  'χτένισμα': 'blow dry',
+  'χτενισμα': 'blow dry',
+  'βαφή': 'colour',
+  'βαφη': 'colour',
+  'βαφή μαλλιών': 'colour',
+  'θεραπεία': 'treatment',
+  'θεραπεια': 'treatment',
+};
+
+function normalizeServiceQuery(query: string): string {
+  const stripped = query
+    .toLowerCase()
+    .trim()
+    .replace(/[?.!,;:'"]+$/g, '')
+    .replace(/^[?.!,;:'"]+/g, '');
+  return SERVICE_QUERY_ALIASES[stripped] ?? stripped;
+}
+
+export function resolveBookingDate(dateStr: string, tz = 'UTC'): string {
+  return resolveDate(dateStr, tz);
 }
 
 export const SlotService = {
@@ -152,19 +211,42 @@ export const SlotService = {
     const params: Array<string> = [businessId];
 
     if (query) {
-      const latinQuery = transliterate(query);
-      sql += ` AND (name ILIKE $2 OR name ILIKE $3)`;
+      const normalized = normalizeServiceQuery(query);
+      const latinQuery = transliterate(normalized);
+      sql += ` AND (name ILIKE $2 OR name ILIKE $3 OR name ILIKE $4)`;
       params.push(`%${query}%`);
+      params.push(`%${normalized}%`);
       params.push(`%${latinQuery}%`);
     }
 
     sql += ' ORDER BY name ASC';
-    const result = await db.query<ServiceRow>(sql, params);
+    let result = await db.query<ServiceRow>(sql, params);
+
+    // If a filtered search found nothing, return all services so the agent can
+    // list options instead of telling the customer nothing exists.
+    if (query && result.rows.length === 0) {
+      result = await db.query<ServiceRow>(`
+        SELECT id, name, description, duration_minutes, price, currency, color
+        FROM services
+        WHERE business_id = $1 AND is_active = TRUE
+        ORDER BY name ASC
+      `, [businessId]);
+    }
+
     return result.rows;
   },
 
   async getAvailableSlots(input: GetSlotsInput): Promise<Slot[]> {
-    const resolvedDate = resolveDate(input.date);
+    // Get business settings and timezone first — needed for date resolution
+    const bizResult = await db.query<BusinessSettingsRow>(
+      'SELECT settings, timezone FROM businesses WHERE id = $1',
+      [input.businessId]
+    );
+    const settings = bizResult.rows[0]?.settings ?? {};
+    const tz = bizResult.rows[0]?.timezone ?? 'UTC';
+    const bufferMinutes: number = settings.bufferMinutes ?? 0;
+
+    const resolvedDate = resolveDate(input.date, tz);
 
     // Get service duration
     const service = await db.query<ServiceDurationRow>(
@@ -191,15 +273,6 @@ export const SlotService = {
 
     const staffResult = await db.query<StaffRow>(staffQuery, staffParams);
     const staffList = staffResult.rows;
-
-    // Get business settings and timezone together
-    const bizResult = await db.query<BusinessSettingsRow>(
-      'SELECT settings, timezone FROM businesses WHERE id = $1',
-      [input.businessId]
-    );
-    const settings = bizResult.rows[0]?.settings ?? {};
-    const tz = bizResult.rows[0]?.timezone ?? 'UTC';
-    const bufferMinutes: number = settings.bufferMinutes ?? 0;
 
     // All time calculations must be done in the business's local timezone so
     // that "09:00" in working_hours means 09:00 in Athens, not 09:00 UTC.

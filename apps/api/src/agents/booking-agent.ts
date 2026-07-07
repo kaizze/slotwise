@@ -1,8 +1,12 @@
 import { BookingService } from '../services/booking.service.js';
-import { SlotService } from '../services/slot.service.js';
+import { SlotService, resolveBookingDate } from '../services/slot.service.js';
 import { CustomerService } from '../services/customer.service.js';
 import { StaffService } from '../services/staff.service.js';
+import { BusinessService } from '../services/business.service.js';
 import type { Business } from '@slotwise/types';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc.js';
+import timezone from 'dayjs/plugin/timezone.js';
 import type { AgentTurnMessage, ToolDefinition } from './llm-types.js';
 import {
   extractReplyText,
@@ -12,16 +16,19 @@ import {
 } from './llm-types.js';
 import { getAgentLlmProvider } from './llm-provider.js';
 
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
 export const AGENT_TOOLS: ToolDefinition[] = [
   {
     name: 'get_services',
-    description: 'List available services for this business. Call this first to match what the customer wants.',
+    description: 'List available services. Call immediately when the customer mentions any service. If a Greek query returns nothing, call again without query to list all services.',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Optional filter e.g. "haircut", "manicure"' },
+        query: { type: 'string', description: 'Optional filter e.g. "haircut", "κούρεμα". Omit to list all services.' },
       },
     },
   },
@@ -43,7 +50,10 @@ export const AGENT_TOOLS: ToolDefinition[] = [
       required: ['service_id'],
       properties: {
         service_id: { type: 'string' },
-        date: { type: 'string', description: 'YYYY-MM-DD or natural e.g. "Wednesday", "tomorrow"' },
+        date: {
+          type: 'string',
+          description: 'Use natural language: "tomorrow", "αύριο", "today", day names — OR YYYY-MM-DD from CURRENT DATE CONTEXT. Never guess dates from memory.',
+        },
         staff_id: { type: 'string', description: 'Optional staff ID if customer requested a specific person' },
         group_by_staff: {
           type: 'boolean',
@@ -107,36 +117,40 @@ export const AGENT_TOOLS: ToolDefinition[] = [
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
-export function buildSystemPrompt(business: Pick<Business, 'name' | 'type' | 'locale' | 'settings'>): string {
+export function buildSystemPrompt(business: Pick<Business, 'name' | 'type' | 'locale' | 'settings' | 'timezone'>): string {
   const defaultLanguage = business.locale === 'el' ? 'Greek' : 'English';
+  const now = dayjs().tz(business.timezone);
+  const today = now.format('YYYY-MM-DD (dddd)');
+  const tomorrow = now.add(1, 'day').format('YYYY-MM-DD (dddd)');
 
   return `You are the booking assistant for ${business.name} (${business.type}).
 
+CURRENT DATE (${business.timezone}):
+- Today: ${today}
+- Tomorrow: ${tomorrow}
+- NEVER invent or guess calendar dates. For get_available_slots use "tomorrow"/"αύριο" or a YYYY-MM-DD from above.
+
 VOICE & LANGUAGE:
 - Reply in the same language the customer uses. If unclear, use ${defaultLanguage}.
-- Tone: warm, clear, and professional — like a helpful front-desk person, not a chatbot or stiff corporate bot.
+- Tone: warm, clear, and professional — like a helpful front-desk person.
 - Keep messages short: 1-3 sentences unless listing time options.
-- Use the customer's name once you know it.
 - Never mention internal IDs, UUIDs, or tool names.
 
 BOOKING FLOW (follow in order):
-1. Understand what they need: service, date/time, staff preference (ask only what's missing).
-2. Call get_services to resolve service names to IDs — always, even if the service seems obvious.
-3. If they name a staff member, call get_staff to resolve the name.
-4. Call get_available_slots — show at most 3 options, formatted clearly (day, time, staff name).
+1. When the customer mentions ANY service (even vaguely like "κουρεματάκι"), call get_services in the SAME turn — do not ask for date/time first.
+2. If they name a staff member, call get_staff to resolve the name.
+3. Call get_available_slots with natural-language dates ("αύριο", "tomorrow") — never a made-up YYYY-MM-DD.
+   - Show at most 3 options with day, time, and staff name.
    - If they ask who is available, use group_by_staff: true.
-5. Collect name and phone before booking.
-6. Summarize all details and wait for explicit confirmation ("yes", "confirm", etc.).
-7. Call create_booking only after they confirm.
-8. End with the booking reference and a brief thank-you.
+4. Collect name and phone before booking.
+5. Confirm all details, then call create_booking only after explicit confirmation.
 
 RULES:
-- Never claim a service or staff member doesn't exist without calling get_services or get_staff first.
-- On each new customer question about services/staff/slots, call the tools again — don't rely on memory alone.
+- Never say a service doesn't exist without calling get_services first. If unsure, call get_services with no query to list all.
 - Never invent availability — always use get_available_slots.
-- Multiple services: book one appointment at a time; offer the next after the first is confirmed.
-- Ambiguous dates ("tomorrow", "Friday", "next week"): confirm the exact date before searching slots.
-- If a tool returns an error, explain simply and ask for the missing info — don't expose raw errors.`;
+- If get_services returns multiple options, present them and ask which one the customer wants.
+- If slots are empty for one date, try the next business day before saying nothing is available.
+- If a tool returns an error, explain simply and retry with corrected inputs.`;
 }
 
 // ─── Tool dispatcher ──────────────────────────────────────────────────────────
@@ -201,14 +215,30 @@ export async function dispatchTool(
           }
         }
 
+        const business = await BusinessService.getById(businessId);
+        const tz = business?.timezone ?? 'UTC';
+        const dateInput = (toolInput.date as string | undefined) ?? 'today';
+        const resolvedDate = resolveBookingDate(dateInput, tz);
+
         const slots = await SlotService.getAvailableSlots({
           businessId,
           serviceId,
-          date: toolInput.date as string,
+          date: dateInput,
           staffId,
           groupByStaff: toolInput.group_by_staff as boolean | undefined,
         });
-        return JSON.stringify(slots.slice(0, 3));
+
+        return JSON.stringify({
+          date_requested: dateInput,
+          date_searched: resolvedDate,
+          slots: slots.slice(0, 3).map((s) => ({
+            starts_at: s.startsAt,
+            ends_at: s.endsAt,
+            staff_id: s.staffId,
+            staff_name: s.staffName,
+            score: s.score,
+          })),
+        });
       }
 
       case 'find_or_create_customer': {
