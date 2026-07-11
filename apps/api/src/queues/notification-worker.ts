@@ -1,6 +1,6 @@
 import { db } from '../db/client.js';
 import { sendSms, sendWhatsApp } from '../services/providers/twilio.provider.js';
-import { sendEmail } from '../services/providers/brevo.provider.js';
+import { EmailService } from '../services/email.service.js';
 import { smsTemplates, emailTemplates } from '../services/notification-templates.js';
 
 interface NotificationRow {
@@ -105,14 +105,17 @@ async function dispatchOne(row: NotificationRow): Promise<void> {
         });
         break;
       }
-      case 'waitlist_offer':
+      case 'waitlist_offer': {
+        const freedSlotStart = row.payload.freedSlotStart as string | Date | undefined;
+        const slotTime = freedSlotStart ? new Date(freedSlotStart) : templateCtx.startsAt;
         body = smsTemplates.waitlistOffer({
           businessName: ctx.businessName,
           serviceName: ctx.serviceName,
-          startsAt: templateCtx.startsAt,
+          startsAt: slotTime,
           locale: ctx.businessLocale,
         });
         break;
+      }
       default:
         throw new Error(`Unknown notification type: ${row.type}`);
     }
@@ -131,12 +134,64 @@ async function dispatchOne(row: NotificationRow): Promise<void> {
 
   if (row.channel === 'email') {
     if (!ctx.customerEmail) throw new Error('Customer has no email address');
-    if (row.type !== 'confirmation') {
-      throw new Error(`No email template for notification type: ${row.type}`);
+
+    let subject: string;
+    let html: string;
+
+    switch (row.type) {
+      case 'confirmation': {
+        const template = emailTemplates.confirmation(templateCtx);
+        subject = template.subject;
+        html = template.html;
+        break;
+      }
+      case 'reminder': {
+        const template = emailTemplates.reminder(templateCtx);
+        subject = template.subject;
+        html = template.html;
+        break;
+      }
+      case 'cancellation': {
+        const template = emailTemplates.cancellation(templateCtx);
+        subject = template.subject;
+        html = template.html;
+        break;
+      }
+      case 'rebook_offer': {
+        const rawNewTime = row.payload.newTime as string | undefined;
+        const template = emailTemplates.rebookOffer({
+          ...templateCtx,
+          newTime: rawNewTime ? new Date(rawNewTime) : templateCtx.startsAt,
+          incentive: row.payload.incentive as string | undefined,
+        });
+        subject = template.subject;
+        html = template.html;
+        break;
+      }
+      case 'waitlist_offer': {
+        const freedSlotStart = row.payload.freedSlotStart as string | Date | undefined;
+        const slotTime = freedSlotStart ? new Date(freedSlotStart) : templateCtx.startsAt;
+        const template = emailTemplates.waitlistOffer({
+          businessName: ctx.businessName,
+          serviceName: ctx.serviceName,
+          startsAt: slotTime,
+          locale: ctx.businessLocale,
+          customerName: ctx.customerName,
+        });
+        subject = template.subject;
+        html = template.html;
+        break;
+      }
+      default:
+        throw new Error(`Unknown notification type: ${row.type}`);
     }
 
-    const { subject, html } = emailTemplates.confirmation(templateCtx);
-    await sendEmail({ to: ctx.customerEmail, toName: ctx.customerName, subject, htmlContent: html });
+    await EmailService.send({
+      to: ctx.customerEmail,
+      toName: ctx.customerName,
+      subject,
+      htmlContent: html,
+    });
 
     await db.query(`UPDATE notifications SET status = 'sent', sent_at = NOW() WHERE id = $1`, [row.id]);
   }

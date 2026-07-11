@@ -178,9 +178,10 @@ async function createBusiness(config: BusinessConfig): Promise<void> {
       slotDurationMinutes: 30,
       bufferMinutes: 0,
       maxAdvanceDays: 30,
-      requiresDeposit: false,
-      smsEnabled: false,
-      agentEnabled: true,
+        requiresDeposit: false,
+        smsEnabled: false,
+        emailEnabled: true,
+        agentEnabled: true,
       noShowThreshold: 0.5,
     };
 

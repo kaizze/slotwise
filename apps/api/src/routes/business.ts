@@ -10,6 +10,7 @@ const updateSettingsSchema = z.object({
   requiresDeposit: z.boolean().optional(),
   depositAmount: z.number().nonnegative().optional(),
   smsEnabled: z.boolean().optional(),
+  emailEnabled: z.boolean().optional(),
   agentEnabled: z.boolean().optional(),
   noShowThreshold: z.number().min(0).max(1).optional(),
 });

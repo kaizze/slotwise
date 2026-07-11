@@ -135,6 +135,19 @@ export function SettingsPage() {
             <div style={formStyles.helpText}>Booking confirmations and reminders sent by text.</div>
           </span>
         </label>
+
+        <label style={formStyles.checkboxRow}>
+          <input
+            type="checkbox"
+            checked={settings.emailEnabled ?? true}
+            disabled={!isOwner}
+            onChange={(e) => update('emailEnabled', e.target.checked)}
+          />
+          <span>
+            Email notifications
+            <div style={formStyles.helpText}>Confirmations, reminders, and offers sent via email when a customer provides an address.</div>
+          </span>
+        </label>
       </section>
 
       <section style={styles.section}>

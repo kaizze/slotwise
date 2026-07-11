@@ -36,16 +36,57 @@ async function enqueue(input: EnqueueInput): Promise<void> {
   ]);
 }
 
+interface ChannelPreferences {
+  sms: boolean;
+  email: boolean;
+}
+
+async function getChannelPreferences(
+  businessId: string,
+  customerId: string
+): Promise<ChannelPreferences> {
+  const result = await db.queryOneOrThrow<{
+    sms_enabled: boolean;
+    email_enabled: boolean;
+    customer_email: string | null;
+  }>(`
+    SELECT
+      COALESCE((b.settings->>'smsEnabled')::boolean, false) AS sms_enabled,
+      COALESCE((b.settings->>'emailEnabled')::boolean, true) AS email_enabled,
+      c.email AS customer_email
+    FROM businesses b
+    JOIN customers c ON c.business_id = b.id
+    WHERE b.id = $1 AND c.id = $2
+  `, [businessId, customerId]);
+
+  return {
+    sms: result.sms_enabled,
+    email: result.email_enabled && !!result.customer_email,
+  };
+}
+
+async function enqueueForCustomer(
+  input: Omit<EnqueueInput, 'channel'>,
+  channels: ChannelPreferences
+): Promise<void> {
+  if (channels.sms) {
+    await enqueue({ ...input, channel: 'sms' });
+  }
+  if (channels.email) {
+    await enqueue({ ...input, channel: 'email' });
+  }
+}
+
 export const NotificationService = {
 
   async scheduleConfirmation(booking: Booking): Promise<void> {
-    await enqueue({
+    const channels = await getChannelPreferences(booking.businessId, booking.customerId);
+    await enqueueForCustomer({
       businessId: booking.businessId,
       bookingId: booking.id,
       customerId: booking.customerId,
       type: 'confirmation',
-      channel: 'sms',
-    });
+    }, channels);
   },
 
   /**
@@ -55,25 +96,25 @@ export const NotificationService = {
   async scheduleExtraReminder(booking: Booking): Promise<void> {
     const twoHoursBefore = new Date(booking.startsAt.getTime() - 2 * 60 * 60_000);
     const scheduledFor = twoHoursBefore > new Date() ? twoHoursBefore : new Date();
+    const channels = await getChannelPreferences(booking.businessId, booking.customerId);
 
-    await enqueue({
+    await enqueueForCustomer({
       businessId: booking.businessId,
       bookingId: booking.id,
       customerId: booking.customerId,
       type: 'reminder',
-      channel: 'sms',
       scheduledFor,
-    });
+    }, channels);
   },
 
   async scheduleCancellationNotice(booking: Booking): Promise<void> {
-    await enqueue({
+    const channels = await getChannelPreferences(booking.businessId, booking.customerId);
+    await enqueueForCustomer({
       businessId: booking.businessId,
       bookingId: booking.id,
       customerId: booking.customerId,
       type: 'cancellation',
-      channel: 'sms',
-    });
+    }, channels);
   },
 
   async sendWaitlistOffer(
@@ -81,29 +122,29 @@ export const NotificationService = {
     waitlistEntry: { id: string; customer_id: string; phone: string; name: string },
     freedSlot: { starts_at: Date; staff_id: string }
   ): Promise<void> {
-    await enqueue({
+    const channels = await getChannelPreferences(businessId, waitlistEntry.customer_id);
+    await enqueueForCustomer({
       businessId,
       customerId: waitlistEntry.customer_id,
       type: 'waitlist_offer',
-      channel: 'sms',
       payload: { freedSlotStart: freedSlot.starts_at },
-    });
+    }, channels);
   },
 
   async sendRebookOffer(
     booking: Booking,
     suggestion: ConsolidationSuggestion
   ): Promise<void> {
-    await enqueue({
+    const channels = await getChannelPreferences(booking.businessId, booking.customerId);
+    await enqueueForCustomer({
       businessId: booking.businessId,
       bookingId: booking.id,
       customerId: booking.customerId,
       type: 'rebook_offer',
-      channel: 'sms',
       payload: {
         newTime: suggestion.suggestedSlot,
         incentive: suggestion.incentive,
       },
-    });
+    }, channels);
   },
 };
