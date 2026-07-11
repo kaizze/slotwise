@@ -73,6 +73,7 @@ export const AuthService = {
       maxAdvanceDays: 30,
       requiresDeposit: false,
       smsEnabled: false,
+      emailEnabled: true,
       agentEnabled: false,
       noShowThreshold: 0.5,
     };

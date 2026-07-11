@@ -39,6 +39,7 @@ async function seed() {
         maxAdvanceDays: 30,
         requiresDeposit: false,
         smsEnabled: false,
+        emailEnabled: true,
         agentEnabled: true,
         noShowThreshold: 0.5,
       }),

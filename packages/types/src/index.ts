@@ -27,6 +27,7 @@ export interface BusinessSettings {
   requiresDeposit: boolean;
   depositAmount?: number;
   smsEnabled: boolean;
+  emailEnabled: boolean;
   agentEnabled: boolean;
   noShowThreshold: number;     // risk score above which extra reminder fires
 }

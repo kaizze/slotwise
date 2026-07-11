@@ -11,6 +11,7 @@ export async function sendEmail(input: {
 }): Promise<{ providerId: string }> {
   const apiKey = process.env.BREVO_API_KEY;
   const fromEmail = process.env.FROM_EMAIL ?? 'noreply@slotwise.app';
+  const fromName = process.env.FROM_NAME ?? 'SlotWise';
 
   if (!apiKey) throw new Error('BREVO_API_KEY not configured');
 
@@ -21,7 +22,7 @@ export async function sendEmail(input: {
       'api-key': apiKey,
     },
     body: JSON.stringify({
-      sender: { email: fromEmail, name: 'SlotWise' },
+      sender: { email: fromEmail, name: fromName },
       to: [{ email: input.to, name: input.toName }],
       subject: input.subject,
       htmlContent: input.htmlContent,
