@@ -23,6 +23,7 @@ interface NotificationContext {
   staffName: string;
   businessName: string;
   businessLocale: string;
+  businessTimezone: string;
   startsAt: Date | null;
   ref: string | null;
 }
@@ -34,6 +35,7 @@ async function loadContext(row: NotificationRow): Promise<NotificationContext> {
     customer_email: string | null;
     business_name: string;
     business_locale: string;
+    business_timezone: string;
     service_name: string | null;
     staff_name: string | null;
     starts_at: Date | null;
@@ -45,6 +47,7 @@ async function loadContext(row: NotificationRow): Promise<NotificationContext> {
       c.email AS customer_email,
       b.name  AS business_name,
       b.locale AS business_locale,
+      b.timezone AS business_timezone,
       s.name  AS service_name,
       st.name AS staff_name,
       bk.starts_at,
@@ -65,6 +68,7 @@ async function loadContext(row: NotificationRow): Promise<NotificationContext> {
     staffName: result.staff_name ?? '',
     businessName: result.business_name,
     businessLocale: result.business_locale,
+    businessTimezone: result.business_timezone,
     startsAt: result.starts_at,
     ref: result.ref,
   };
@@ -81,6 +85,7 @@ async function dispatchOne(row: NotificationRow): Promise<void> {
     startsAt: ctx.startsAt ?? new Date(),
     ref: ctx.ref ?? '',
     locale: ctx.businessLocale,
+    timezone: ctx.businessTimezone,
   };
 
   if (row.channel === 'sms' || row.channel === 'whatsapp') {
@@ -113,6 +118,7 @@ async function dispatchOne(row: NotificationRow): Promise<void> {
           serviceName: ctx.serviceName,
           startsAt: slotTime,
           locale: ctx.businessLocale,
+          timezone: ctx.businessTimezone,
         });
         break;
       }
@@ -176,6 +182,7 @@ async function dispatchOne(row: NotificationRow): Promise<void> {
           serviceName: ctx.serviceName,
           startsAt: slotTime,
           locale: ctx.businessLocale,
+          timezone: ctx.businessTimezone,
           customerName: ctx.customerName,
         });
         subject = template.subject;
