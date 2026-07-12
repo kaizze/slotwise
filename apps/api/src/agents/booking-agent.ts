@@ -19,6 +19,26 @@ import { getAgentLlmProvider } from './llm-provider.js';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+function formatBookingForAgent(
+  booking: {
+    ref: string;
+    startsAt: Date;
+    serviceName?: string;
+    staffName?: string;
+  },
+  tz: string,
+) {
+  const start = dayjs(booking.startsAt).tz(tz);
+  return {
+    ref: booking.ref,
+    service_name: booking.serviceName,
+    staff_name: booking.staffName,
+    local_time: start.format('HH:mm'),
+    local_datetime: start.format('dddd D MMMM, HH:mm'),
+    starts_at: booking.startsAt,
+  };
+}
+
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
 export const AGENT_TOOLS: ToolDefinition[] = [
@@ -97,7 +117,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'get_customer_bookings',
-    description: 'Look up existing and upcoming bookings for a customer by phone.',
+    description: 'Look up existing and upcoming bookings for a customer by phone. Times are in local_time / local_datetime (business timezone) — always use those when talking to the customer, not starts_at.',
     parameters: {
       type: 'object',
       required: ['phone'],
@@ -155,7 +175,8 @@ RULES:
 - Never invent availability — always use get_available_slots.
 - If get_services returns multiple options, present them and ask which one the customer wants.
 - If slots are empty for one date, try the next business day before saying nothing is available.
-- If a tool returns an error, explain simply and retry with corrected inputs.`;
+- If a tool returns an error, explain simply and retry with corrected inputs.
+- When presenting booking times to the customer, always use local_time or local_datetime from tool results — never convert starts_at yourself (it is UTC).`;
 }
 
 // ─── Tool dispatcher ──────────────────────────────────────────────────────────
@@ -282,12 +303,20 @@ export async function dispatchTool(
           notes: toolInput.notes as string | undefined,
           channel: 'agent',
         });
-        return JSON.stringify({ ref: booking.ref, startsAt: booking.startsAt });
+
+        const business = await BusinessService.getById(businessId);
+        const tz = business?.timezone ?? 'UTC';
+        return JSON.stringify(formatBookingForAgent(booking, tz));
       }
 
       case 'get_customer_bookings': {
+        const business = await BusinessService.getById(businessId);
+        const tz = business?.timezone ?? 'UTC';
         const bookings = await BookingService.getByPhone(businessId, toolInput.phone as string);
-        return JSON.stringify(bookings);
+        return JSON.stringify({
+          timezone: tz,
+          bookings: bookings.map((b) => formatBookingForAgent(b, tz)),
+        });
       }
 
       case 'cancel_booking': {
