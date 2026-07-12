@@ -1,5 +1,10 @@
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc.js';
+import timezone from 'dayjs/plugin/timezone.js';
 import 'dayjs/locale/el.js';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 interface BookingContext {
   customerName: string;
@@ -9,10 +14,11 @@ interface BookingContext {
   startsAt: Date;
   ref: string;
   locale?: string;
+  timezone?: string;
 }
 
-function formatDateTime(date: Date, locale = 'en'): string {
-  const d = dayjs(date).locale(locale === 'el' ? 'el' : 'en');
+function formatDateTime(date: Date, locale = 'en', tz = 'UTC'): string {
+  const d = dayjs(date).tz(tz).locale(locale === 'el' ? 'el' : 'en');
   return d.format('dddd D MMMM, HH:mm');
 }
 
@@ -29,7 +35,7 @@ function emailLayout(businessName: string, body: string): string {
 
 export const smsTemplates = {
   confirmation(ctx: BookingContext): string {
-    const when = formatDateTime(ctx.startsAt, ctx.locale);
+    const when = formatDateTime(ctx.startsAt, ctx.locale, ctx.timezone);
     if (ctx.locale === 'el') {
       return `${ctx.businessName}: Το ραντεβού σου για ${ctx.serviceName} επιβεβαιώθηκε για ${when} με ${ctx.staffName}. Κωδ: ${ctx.ref}`;
     }
@@ -37,7 +43,7 @@ export const smsTemplates = {
   },
 
   reminder(ctx: BookingContext): string {
-    const when = formatDateTime(ctx.startsAt, ctx.locale);
+    const when = formatDateTime(ctx.startsAt, ctx.locale, ctx.timezone);
     if (ctx.locale === 'el') {
       return `Υπενθύμιση: Ραντεβού ${ctx.serviceName} στις ${when} (${ctx.businessName}). Απάντησε CANCEL για ακύρωση.`;
     }
@@ -52,7 +58,7 @@ export const smsTemplates = {
   },
 
   rebookOffer(ctx: BookingContext & { newTime: Date; incentive?: string }): string {
-    const newWhen = formatDateTime(ctx.newTime, ctx.locale);
+    const newWhen = formatDateTime(ctx.newTime, ctx.locale, ctx.timezone);
     const incentiveText = ctx.incentive ? ` ${ctx.incentive}` : '';
     if (ctx.locale === 'el') {
       return `${ctx.businessName}: Άνοιξε θέση στις ${newWhen}. Θες να μετακινήσουμε το ραντεβού σου εκεί?${incentiveText} Απάντησε ΝΑΙ.`;
@@ -60,8 +66,8 @@ export const smsTemplates = {
     return `${ctx.businessName}: A slot opened at ${newWhen}. Want to move your appointment there?${incentiveText} Reply YES.`;
   },
 
-  waitlistOffer(ctx: { businessName: string; serviceName: string; startsAt: Date; locale?: string }): string {
-    const when = formatDateTime(ctx.startsAt, ctx.locale);
+  waitlistOffer(ctx: { businessName: string; serviceName: string; startsAt: Date; locale?: string; timezone?: string }): string {
+    const when = formatDateTime(ctx.startsAt, ctx.locale, ctx.timezone);
     if (ctx.locale === 'el') {
       return `${ctx.businessName}: Άνοιξε θέση για ${ctx.serviceName} στις ${when}. Απάντησε ΝΑΙ για να κλείσεις.`;
     }
@@ -73,7 +79,7 @@ export const smsTemplates = {
 
 export const emailTemplates = {
   confirmation(ctx: BookingContext): { subject: string; html: string } {
-    const when = formatDateTime(ctx.startsAt, ctx.locale);
+    const when = formatDateTime(ctx.startsAt, ctx.locale, ctx.timezone);
     const isEl = ctx.locale === 'el';
     const subject = isEl
       ? `Επιβεβαίωση ραντεβού — ${ctx.businessName}`
@@ -107,7 +113,7 @@ export const emailTemplates = {
   },
 
   reminder(ctx: BookingContext): { subject: string; html: string } {
-    const when = formatDateTime(ctx.startsAt, ctx.locale);
+    const when = formatDateTime(ctx.startsAt, ctx.locale, ctx.timezone);
     const isEl = ctx.locale === 'el';
     const subject = isEl
       ? `Υπενθύμιση ραντεβού — ${ctx.businessName}`
@@ -150,7 +156,7 @@ export const emailTemplates = {
   },
 
   rebookOffer(ctx: BookingContext & { newTime: Date; incentive?: string }): { subject: string; html: string } {
-    const newWhen = formatDateTime(ctx.newTime, ctx.locale);
+    const newWhen = formatDateTime(ctx.newTime, ctx.locale, ctx.timezone);
     const isEl = ctx.locale === 'el';
     const subject = isEl
       ? `Νέα διαθέσιμη ώρα — ${ctx.businessName}`
@@ -177,8 +183,8 @@ export const emailTemplates = {
     return { subject, html: emailLayout(ctx.businessName, body) };
   },
 
-  waitlistOffer(ctx: { businessName: string; serviceName: string; startsAt: Date; locale?: string; customerName?: string }): { subject: string; html: string } {
-    const when = formatDateTime(ctx.startsAt, ctx.locale);
+  waitlistOffer(ctx: { businessName: string; serviceName: string; startsAt: Date; locale?: string; timezone?: string; customerName?: string }): { subject: string; html: string } {
+    const when = formatDateTime(ctx.startsAt, ctx.locale, ctx.timezone);
     const isEl = ctx.locale === 'el';
     const subject = isEl
       ? `Θέση διαθέσιμη — ${ctx.businessName}`
