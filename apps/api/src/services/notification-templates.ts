@@ -57,21 +57,23 @@ export const smsTemplates = {
     return `${ctx.businessName}: Your appointment (${ctx.ref}) has been cancelled.`;
   },
 
-  rebookOffer(ctx: BookingContext & { newTime: Date; incentive?: string }): string {
+  rebookOffer(ctx: BookingContext & { newTime: Date; incentive?: string; offerToken?: string }): string {
     const newWhen = formatDateTime(ctx.newTime, ctx.locale, ctx.timezone);
     const incentiveText = ctx.incentive ? ` ${ctx.incentive}` : '';
+    const codeText = ctx.offerToken ? ` Code: ${ctx.offerToken}.` : '';
     if (ctx.locale === 'el') {
-      return `${ctx.businessName}: Άνοιξε θέση στις ${newWhen}. Θες να μετακινήσουμε το ραντεβού σου εκεί?${incentiveText} Απάντησε ΝΑΙ.`;
+      return `${ctx.businessName}: Άνοιξε θέση στις ${newWhen}. Θες να μετακινήσουμε το ραντεβού σου εκεί?${incentiveText} Απάντησε ΝΑΙ.${codeText}`;
     }
-    return `${ctx.businessName}: A slot opened at ${newWhen}. Want to move your appointment there?${incentiveText} Reply YES.`;
+    return `${ctx.businessName}: A slot opened at ${newWhen}. Want to move your appointment there?${incentiveText} Reply YES.${codeText}`;
   },
 
-  waitlistOffer(ctx: { businessName: string; serviceName: string; startsAt: Date; locale?: string; timezone?: string }): string {
+  waitlistOffer(ctx: { businessName: string; serviceName: string; startsAt: Date; locale?: string; timezone?: string; offerToken?: string }): string {
     const when = formatDateTime(ctx.startsAt, ctx.locale, ctx.timezone);
+    const codeText = ctx.offerToken ? ` Code: ${ctx.offerToken}.` : '';
     if (ctx.locale === 'el') {
-      return `${ctx.businessName}: Άνοιξε θέση για ${ctx.serviceName} στις ${when}. Απάντησε ΝΑΙ για να κλείσεις.`;
+      return `${ctx.businessName}: Άνοιξε θέση για ${ctx.serviceName} στις ${when}. Απάντησε ΝΑΙ για να κλείσεις.${codeText}`;
     }
-    return `${ctx.businessName}: A slot just opened for ${ctx.serviceName} at ${when}. Reply YES to book it.`;
+    return `${ctx.businessName}: A slot just opened for ${ctx.serviceName} at ${when}. Reply YES to book it.${codeText}`;
   },
 };
 
@@ -155,7 +157,7 @@ export const emailTemplates = {
     return { subject, html: emailLayout(ctx.businessName, body) };
   },
 
-  rebookOffer(ctx: BookingContext & { newTime: Date; incentive?: string }): { subject: string; html: string } {
+  rebookOffer(ctx: BookingContext & { newTime: Date; incentive?: string; offerToken?: string }): { subject: string; html: string } {
     const newWhen = formatDateTime(ctx.newTime, ctx.locale, ctx.timezone);
     const isEl = ctx.locale === 'el';
     const subject = isEl
@@ -165,25 +167,30 @@ export const emailTemplates = {
     const incentiveLine = ctx.incentive
       ? (isEl ? `<p>${ctx.incentive}</p>` : `<p>${ctx.incentive}</p>`)
       : '';
+    const codeLine = ctx.offerToken
+      ? (isEl ? `<p>Κωδικός: <strong>${ctx.offerToken}</strong></p>` : `<p>Code: <strong>${ctx.offerToken}</strong></p>`)
+      : '';
 
     const body = isEl
       ? `
         <p>Γεια σου ${ctx.customerName},</p>
         <p>Άνοιξε θέση στις <strong>${newWhen}</strong> για ${ctx.serviceName}.</p>
         ${incentiveLine}
-        <p>Θέλεις να μετακινήσουμε το ραντεβού σου εκεί; Απάντησε σε αυτό το email.</p>
+        <p>Θέλεις να μετακινήσουμε το ραντεβού σου εκεί; Απάντησε <strong>ΝΑΙ</strong> σε αυτό το email ή στο chat.</p>
+        ${codeLine}
       `
       : `
         <p>Hi ${ctx.customerName},</p>
         <p>A slot opened at <strong>${newWhen}</strong> for ${ctx.serviceName}.</p>
         ${incentiveLine}
-        <p>Would you like to move your appointment? Reply to this email and we'll take care of it.</p>
+        <p>Would you like to move your appointment? Reply <strong>YES</strong> to this email or in chat.</p>
+        ${codeLine}
       `;
 
     return { subject, html: emailLayout(ctx.businessName, body) };
   },
 
-  waitlistOffer(ctx: { businessName: string; serviceName: string; startsAt: Date; locale?: string; timezone?: string; customerName?: string }): { subject: string; html: string } {
+  waitlistOffer(ctx: { businessName: string; serviceName: string; startsAt: Date; locale?: string; timezone?: string; customerName?: string; offerToken?: string }): { subject: string; html: string } {
     const when = formatDateTime(ctx.startsAt, ctx.locale, ctx.timezone);
     const isEl = ctx.locale === 'el';
     const subject = isEl
@@ -193,17 +200,22 @@ export const emailTemplates = {
     const greeting = ctx.customerName
       ? (isEl ? `Γεια σου ${ctx.customerName},` : `Hi ${ctx.customerName},`)
       : (isEl ? 'Γεια σου,' : 'Hi,');
+    const codeLine = ctx.offerToken
+      ? (isEl ? `<p>Κωδικός: <strong>${ctx.offerToken}</strong></p>` : `<p>Code: <strong>${ctx.offerToken}</strong></p>`)
+      : '';
 
     const body = isEl
       ? `
         <p>${greeting}</p>
         <p>Άνοιξε θέση για <strong>${ctx.serviceName}</strong> στις <strong>${when}</strong>.</p>
-        <p>Απάντησε σε αυτό το email για να κλείσεις.</p>
+        <p>Απάντησε <strong>ΝΑΙ</strong> σε αυτό το email ή στο chat για να κλείσεις.</p>
+        ${codeLine}
       `
       : `
         <p>${greeting}</p>
         <p>A slot just opened for <strong>${ctx.serviceName}</strong> at <strong>${when}</strong>.</p>
-        <p>Reply to this email to book it.</p>
+        <p>Reply <strong>YES</strong> to this email or in chat to book it.</p>
+        ${codeLine}
       `;
 
     return { subject, html: emailLayout(ctx.businessName, body) };

@@ -120,20 +120,27 @@ export const NotificationService = {
   async sendWaitlistOffer(
     businessId: string,
     waitlistEntry: { id: string; customer_id: string; phone: string; name: string },
-    freedSlot: { starts_at: Date; staff_id: string }
+    freedSlot: { starts_at: Date; ends_at: Date; staff_id: string },
+    offerMeta?: { offerId: string; offerToken: string; serviceName: string },
   ): Promise<void> {
     const channels = await getChannelPreferences(businessId, waitlistEntry.customer_id);
     await enqueueForCustomer({
       businessId,
       customerId: waitlistEntry.customer_id,
       type: 'waitlist_offer',
-      payload: { freedSlotStart: freedSlot.starts_at },
+      payload: {
+        freedSlotStart: freedSlot.starts_at,
+        serviceName: offerMeta?.serviceName,
+        offerId: offerMeta?.offerId,
+        offerToken: offerMeta?.offerToken,
+      },
     }, channels);
   },
 
   async sendRebookOffer(
     booking: Booking,
-    suggestion: ConsolidationSuggestion
+    suggestion: ConsolidationSuggestion,
+    offerMeta?: { offerId: string; offerToken: string },
   ): Promise<void> {
     const channels = await getChannelPreferences(booking.businessId, booking.customerId);
     await enqueueForCustomer({
@@ -144,6 +151,8 @@ export const NotificationService = {
       payload: {
         newTime: suggestion.suggestedSlot,
         incentive: suggestion.incentive,
+        offerId: offerMeta?.offerId,
+        offerToken: offerMeta?.offerToken,
       },
     }, channels);
   },

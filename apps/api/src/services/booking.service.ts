@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { db } from '../db/client.js';
 import { rankSlots, scoreNoShowRisk, findConsolidationOpportunities } from '@slotwise/slot-optimizer';
 import { NotificationService } from './notification.service.js';
+import { SlotOfferService } from './slot-offer.service.js';
 import type { Booking, BookingChannel, Slot } from '@slotwise/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -59,8 +60,10 @@ interface BookingRow {
 interface WaitlistEntryRow {
   id: string;
   customer_id: string;
+  service_id: string;
   phone: string;
   name: string;
+  service_name: string;
 }
 
 // ─── Booking reference generator ──────────────────────────────────────────────
@@ -189,6 +192,50 @@ export const BookingService = {
     return booking;
   },
 
+  async reschedule(businessId: string, ref: string, newStartsAt: Date): Promise<Booking> {
+    const existing = await db.queryOne<BookingRow>(`
+      SELECT * FROM bookings
+      WHERE ref = $1 AND business_id = $2 AND status = 'confirmed'
+    `, [ref, businessId]);
+
+    if (!existing) throw new Error('Booking not found or not confirmed');
+
+    const service = await db.query<ServiceDurationRow>(
+      'SELECT duration_minutes, price FROM services WHERE id = $1',
+      [existing.service_id]
+    );
+    const serviceRow = service.rows[0];
+    if (!serviceRow) throw new Error('Service not found');
+
+    const endsAt = new Date(newStartsAt.getTime() + serviceRow.duration_minutes * 60_000);
+
+    const conflict = await db.query(`
+      SELECT id FROM bookings
+      WHERE staff_id = $1
+        AND status NOT IN ('cancelled')
+        AND id != $4
+        AND tstzrange(starts_at, ends_at) && tstzrange($2::timestamptz, $3::timestamptz)
+    `, [existing.staff_id, newStartsAt.toISOString(), endsAt.toISOString(), existing.id]);
+
+    if (conflict.rows.length > 0) {
+      throw new Error('Slot is no longer available');
+    }
+
+    const result = await db.query<BookingRow>(`
+      UPDATE bookings
+      SET starts_at = $2, ends_at = $3, updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `, [existing.id, newStartsAt, endsAt]);
+
+    const updatedRow = result.rows[0];
+    if (!updatedRow) throw new Error('Reschedule failed');
+
+    const booking = toBooking(updatedRow);
+    await NotificationService.scheduleConfirmation(booking);
+    return booking;
+  },
+
   async cancel(businessId: string, ref: string, reason?: string): Promise<{ success: boolean; freedSlot: { startsAt: Date; endsAt: Date; staffId: string } }> {
     const result = await db.query<BookingRow>(`
       UPDATE bookings
@@ -223,24 +270,48 @@ export const BookingService = {
     businessId: string,
     cancelledBooking: { starts_at: Date; ends_at: Date; staff_id: string }
   ): Promise<void> {
-    // 1. Check waitlist first
+    const freedStart = new Date(cancelledBooking.starts_at);
+    const freedEnd = new Date(cancelledBooking.ends_at);
+
+    // 1. Check waitlist first — one customer at a time
     const waitlisted = await db.query<WaitlistEntryRow>(`
-      SELECT w.*, c.phone, c.name FROM waitlist w
+      SELECT w.*, c.phone, c.name, s.name AS service_name
+      FROM waitlist w
       JOIN customers c ON c.id = w.customer_id
+      JOIN services s ON s.id = w.service_id
       WHERE w.business_id = $1
         AND w.notified = FALSE
-        AND (w.preferred_window_start IS NULL OR w.preferred_window_start <= $2)
-        AND (w.preferred_window_end IS NULL OR w.preferred_window_end >= $2)
+        AND (w.staff_id IS NULL OR w.staff_id = $2)
+        AND (w.preferred_window_start IS NULL OR w.preferred_window_start <= $3)
+        AND (w.preferred_window_end IS NULL OR w.preferred_window_end >= $3)
       ORDER BY w.created_at ASC
-      LIMIT 3
-    `, [businessId, cancelledBooking.starts_at]);
+      LIMIT 1
+    `, [businessId, cancelledBooking.staff_id, freedStart]);
 
     if (waitlisted.rows.length > 0) {
-      for (const entry of waitlisted.rows) {
-        await NotificationService.sendWaitlistOffer(businessId, entry, cancelledBooking);
-        await db.query('UPDATE waitlist SET notified = TRUE WHERE id = $1', [entry.id]);
-      }
-      return; // Waitlist takes priority
+      const entry = waitlisted.rows[0]!;
+      const { offerId, offerToken } = await SlotOfferService.createWaitlistOffer({
+        businessId,
+        customerId: entry.customer_id,
+        waitlistId: entry.id,
+        serviceId: entry.service_id,
+        staffId: cancelledBooking.staff_id,
+        slotStartsAt: freedStart,
+        slotEndsAt: freedEnd,
+      });
+
+      await NotificationService.sendWaitlistOffer(businessId, entry, cancelledBooking, {
+        offerId,
+        offerToken,
+        serviceName: entry.service_name,
+      });
+
+      console.info('[cancellation-recovery] Sent waitlist offer', {
+        businessId,
+        customerId: entry.customer_id,
+        offerToken,
+      });
+      return;
     }
 
     // 2. Find consolidation opportunities
@@ -256,21 +327,44 @@ export const BookingService = {
 
     const opportunities = findConsolidationOpportunities(
       {
-        startsAt: new Date(cancelledBooking.starts_at),
-        endsAt: new Date(cancelledBooking.ends_at),
+        startsAt: freedStart,
+        endsAt: freedEnd,
         staffId: cancelledBooking.staff_id,
       },
       remainingBookings
     );
 
-    // Notify top opportunity customer
+    console.info('[cancellation-recovery] Consolidation scan', {
+      businessId,
+      remainingBookings: remainingBookings.length,
+      opportunities: opportunities.length,
+      topScoreGain: opportunities[0]?.scoreGain ?? null,
+    });
+
     const top = opportunities[0];
-    if (top && top.scoreGain >= 15) {
+    const minGain = SlotOfferService.consolidationMinScoreGain;
+
+    if (top && top.scoreGain >= minGain) {
       const booking = remainingBookings.find((b: Booking) => b.id === top.bookingId);
       if (booking) {
-        await NotificationService.sendRebookOffer(booking, top);
+        const { offerId, offerToken } = await SlotOfferService.createRebookOffer(
+          booking,
+          top,
+          freedEnd,
+        );
+        await NotificationService.sendRebookOffer(booking, top, { offerId, offerToken });
+
+        console.info('[cancellation-recovery] Sent rebook offer', {
+          businessId,
+          bookingRef: booking.ref,
+          scoreGain: top.scoreGain,
+          offerToken,
+        });
+        return;
       }
     }
+
+    console.info('[cancellation-recovery] No recovery action taken', { businessId });
   },
 
   async getByPhone(businessId: string, phone: string): Promise<Booking[]> {
