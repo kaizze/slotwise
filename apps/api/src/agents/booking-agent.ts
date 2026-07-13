@@ -3,6 +3,8 @@ import { SlotService, resolveBookingDate, resolveTimeOfDay } from '../services/s
 import { CustomerService } from '../services/customer.service.js';
 import { StaffService } from '../services/staff.service.js';
 import { BusinessService } from '../services/business.service.js';
+import { SlotOfferService } from '../services/slot-offer.service.js';
+import { WaitlistService } from '../services/waitlist.service.js';
 import type { Business } from '@slotwise/types';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
@@ -138,6 +140,44 @@ export const AGENT_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    name: 'get_pending_offers',
+    description: 'List active slot offers (rebook or waitlist) for a customer by phone. Use when they ask about moving an appointment or a slot offer.',
+    parameters: {
+      type: 'object',
+      required: ['phone'],
+      properties: {
+        phone: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'accept_slot_offer',
+    description: 'Accept a pending slot offer and book/reschedule the appointment. Call when customer says YES/ΝΑΙ to a rebook or waitlist offer.',
+    parameters: {
+      type: 'object',
+      required: ['phone'],
+      properties: {
+        phone: { type: 'string' },
+        offer_token: { type: 'string', description: 'Optional offer code from the notification' },
+      },
+    },
+  },
+  {
+    name: 'join_waitlist',
+    description: 'Add customer to waitlist when no suitable slots are available. They will be notified if a slot opens.',
+    parameters: {
+      type: 'object',
+      required: ['phone', 'name', 'service_id'],
+      properties: {
+        phone: { type: 'string' },
+        name: { type: 'string' },
+        service_id: { type: 'string' },
+        staff_id: { type: 'string' },
+        preferred_date: { type: 'string', description: 'YYYY-MM-DD or natural language like tomorrow' },
+      },
+    },
+  },
 ];
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -176,7 +216,9 @@ RULES:
 - If get_services returns multiple options, present them and ask which one the customer wants.
 - If slots are empty for one date, try the next business day before saying nothing is available.
 - If a tool returns an error, explain simply and retry with corrected inputs.
-- When presenting booking times to the customer, always use local_time or local_datetime from tool results — never convert starts_at yourself (it is UTC).`;
+- When presenting booking times to the customer, always use local_time or local_datetime from tool results — never convert starts_at yourself (it is UTC).
+- If the customer says YES/ΝΑΙ after a slot offer notification, call accept_slot_offer with their phone.
+- If no slots are available and they want to be notified, offer join_waitlist.`;
 }
 
 // ─── Tool dispatcher ──────────────────────────────────────────────────────────
@@ -326,6 +368,97 @@ export async function dispatchTool(
           toolInput.reason as string
         );
         return JSON.stringify(result);
+      }
+
+      case 'get_pending_offers': {
+        const business = await BusinessService.getById(businessId);
+        const tz = business?.timezone ?? 'UTC';
+        const offers = await SlotOfferService.getPendingForPhone(
+          businessId,
+          toolInput.phone as string,
+        );
+        return JSON.stringify({
+          timezone: tz,
+          offers: offers.map((o) => ({
+            offer_id: o.id,
+            offer_token: o.offer_token,
+            offer_type: o.offer_type,
+            local_time: dayjs(o.slot_starts_at).tz(tz).format('HH:mm'),
+            local_datetime: dayjs(o.slot_starts_at).tz(tz).format('dddd D MMMM, HH:mm'),
+            service_name: o.service_name,
+            staff_name: o.staff_name,
+            booking_ref: o.booking_ref,
+            incentive: o.incentive,
+          })),
+        });
+      }
+
+      case 'accept_slot_offer': {
+        const phone = toolInput.phone as string;
+        const normalizedPhone = phone.replace(/\s+/g, '');
+        const customer = await CustomerService.getByPhone(businessId, normalizedPhone);
+        if (!customer) {
+          return JSON.stringify({ error: 'Customer not found' });
+        }
+
+        const pending = await SlotOfferService.getPendingForPhone(businessId, normalizedPhone);
+        const token = toolInput.offer_token as string | undefined;
+        const offer = token
+          ? pending.find((o) => o.offer_token === token.toUpperCase()) ?? pending[0]
+          : pending[0];
+
+        if (!offer) {
+          return JSON.stringify({ error: 'No active offer found for this customer' });
+        }
+
+        const result = await SlotOfferService.acceptOffer(
+          offer.id,
+          businessId,
+          customer.id,
+          token,
+        );
+        return JSON.stringify({
+          success: true,
+          ref: result.booking.ref,
+          message: result.message,
+        });
+      }
+
+      case 'join_waitlist': {
+        let serviceId = toolInput.service_id as string;
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!UUID_RE.test(serviceId)) {
+          const services = await SlotService.getServices(businessId, serviceId);
+          if (!services[0]) {
+            return JSON.stringify({ error: `No service found matching "${serviceId}". Call get_services first.` });
+          }
+          serviceId = services[0].id;
+        }
+
+        const business = await BusinessService.getById(businessId);
+        const tz = business?.timezone ?? 'UTC';
+
+        let preferredWindowStart: Date | undefined;
+        let preferredWindowEnd: Date | undefined;
+        const preferredDate = toolInput.preferred_date as string | undefined;
+        if (preferredDate) {
+          const resolved = resolveBookingDate(preferredDate, tz);
+          const dayStart = dayjs.tz(resolved, tz).startOf('day');
+          preferredWindowStart = dayStart.toDate();
+          preferredWindowEnd = dayStart.endOf('day').toDate();
+        }
+
+        const entry = await WaitlistService.join({
+          businessId,
+          serviceId,
+          customerName: toolInput.name as string,
+          customerPhone: toolInput.phone as string,
+          staffId: toolInput.staff_id as string | undefined,
+          preferredWindowStart,
+          preferredWindowEnd,
+        });
+
+        return JSON.stringify({ success: true, waitlist_id: entry.id });
       }
 
       default:

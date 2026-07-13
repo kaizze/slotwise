@@ -4,6 +4,7 @@ import twilio from 'twilio';
 import { db } from '../db/client.js';
 import { BusinessService } from '../services/business.service.js';
 import { runAgentTurn } from '../agents/booking-agent.js';
+import { SlotOfferService } from '../services/slot-offer.service.js';
 
 // ─── Twilio request authenticity check ────────────────────────────────────────
 // Twilio signs every webhook request with HMAC-SHA1 over the full request URL
@@ -134,6 +135,15 @@ async function handleInboundMessage(
   const phone = extractPhone(body.From);
 
   try {
+    const acceptance = await SlotOfferService.tryAcceptFromMessage(
+      business.id,
+      phone,
+      body.Body,
+    );
+    if (acceptance.handled && acceptance.reply) {
+      return twimlResponse(acceptance.reply);
+    }
+
     const session = await getOrCreateSessionByPhone(business.id, phone, channel);
 
     const { reply: agentReply, history } = await runAgentTurn(

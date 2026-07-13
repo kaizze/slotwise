@@ -107,6 +107,7 @@ async function dispatchOne(row: NotificationRow): Promise<void> {
           ...templateCtx,
           newTime: rawNewTime ? new Date(rawNewTime) : templateCtx.startsAt,
           incentive: row.payload.incentive as string | undefined,
+          offerToken: row.payload.offerToken as string | undefined,
         });
         break;
       }
@@ -115,10 +116,11 @@ async function dispatchOne(row: NotificationRow): Promise<void> {
         const slotTime = freedSlotStart ? new Date(freedSlotStart) : templateCtx.startsAt;
         body = smsTemplates.waitlistOffer({
           businessName: ctx.businessName,
-          serviceName: ctx.serviceName,
+          serviceName: (row.payload.serviceName as string | undefined) ?? ctx.serviceName,
           startsAt: slotTime,
           locale: ctx.businessLocale,
           timezone: ctx.businessTimezone,
+          offerToken: row.payload.offerToken as string | undefined,
         });
         break;
       }
@@ -169,6 +171,7 @@ async function dispatchOne(row: NotificationRow): Promise<void> {
           ...templateCtx,
           newTime: rawNewTime ? new Date(rawNewTime) : templateCtx.startsAt,
           incentive: row.payload.incentive as string | undefined,
+          offerToken: row.payload.offerToken as string | undefined,
         });
         subject = template.subject;
         html = template.html;
@@ -179,11 +182,12 @@ async function dispatchOne(row: NotificationRow): Promise<void> {
         const slotTime = freedSlotStart ? new Date(freedSlotStart) : templateCtx.startsAt;
         const template = emailTemplates.waitlistOffer({
           businessName: ctx.businessName,
-          serviceName: ctx.serviceName,
+          serviceName: (row.payload.serviceName as string | undefined) ?? ctx.serviceName,
           startsAt: slotTime,
           locale: ctx.businessLocale,
           timezone: ctx.businessTimezone,
           customerName: ctx.customerName,
+          offerToken: row.payload.offerToken as string | undefined,
         });
         subject = template.subject;
         html = template.html;
