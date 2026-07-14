@@ -319,6 +319,36 @@
   font-size: 13px;
 }
 
+.sw-empty-title {
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--sw-ink);
+  margin-bottom: 4px;
+}
+
+.sw-empty-sub {
+  font-size: 13px;
+  color: var(--sw-ink-muted);
+  line-height: 1.4;
+}
+
+.sw-waitlist {
+  padding: 8px 0 4px;
+}
+
+.sw-button-secondary {
+  width: 100%;
+  margin-top: 8px;
+  padding: 11px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--sw-border, #e5e7eb);
+  background: transparent;
+  color: var(--sw-ink-muted);
+  font-family: var(--sw-font);
+  font-size: 13px;
+  cursor: pointer;
+}
+
 /* ── Form ─────────────────────────────────────────────────────────────────── */
 
 .sw-field {

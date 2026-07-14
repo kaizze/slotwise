@@ -75,6 +75,38 @@ export interface BusinessSettings {
   noShowThreshold: number;
 }
 
+export interface DashboardWaitlistEntry {
+  id: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  serviceName: string;
+  staffName?: string;
+  notified: boolean;
+  preferredWindowStart?: string;
+  preferredWindowEnd?: string;
+  createdAt: string;
+}
+
+export interface DashboardSlotOffer {
+  id: string;
+  offerType: 'rebook' | 'waitlist';
+  status: string;
+  offerToken: string;
+  slotStartsAt: string;
+  slotEndsAt: string;
+  expiresAt: string;
+  acceptedAt?: string;
+  createdAt: string;
+  incentive?: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  serviceName: string;
+  staffName: string;
+  bookingRef?: string;
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
 export class ApiError extends Error {
@@ -317,5 +349,23 @@ export const businessSettingsApi = {
       method: 'PATCH',
       body: JSON.stringify(updates),
     });
+  },
+};
+
+// ─── Waitlist & offers (slot-filling visibility) ─────────────────────────────
+
+export const waitlistApi = {
+  async list(includeNotified = false): Promise<DashboardWaitlistEntry[]> {
+    const params = new URLSearchParams();
+    if (includeNotified) params.set('includeNotified', 'true');
+    const qs = params.toString();
+    return request<DashboardWaitlistEntry[]>(`/api/v1/waitlist${qs ? `?${qs}` : ''}`);
+  },
+};
+
+export const offersApi = {
+  async list(status: 'pending' | 'accepted' | 'expired' | 'cancelled' | 'all' = 'all'): Promise<DashboardSlotOffer[]> {
+    const params = new URLSearchParams({ status });
+    return request<DashboardSlotOffer[]>(`/api/v1/offers?${params}`);
   },
 };

@@ -41,9 +41,91 @@ function messageContainsToken(message: string, token: string): boolean {
   return message.toUpperCase().includes(token.toUpperCase());
 }
 
+export interface SlotOfferListItem {
+  id: string;
+  offerType: 'rebook' | 'waitlist';
+  status: string;
+  offerToken: string;
+  slotStartsAt: string;
+  slotEndsAt: string;
+  expiresAt: string;
+  acceptedAt?: string;
+  createdAt: string;
+  incentive?: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  serviceName: string;
+  staffName: string;
+  bookingRef?: string;
+}
+
 export const SlotOfferService = {
 
   consolidationMinScoreGain: CONSOLIDATION_MIN_SCORE_GAIN,
+
+  async list(businessId: string, options?: {
+    status?: 'pending' | 'accepted' | 'expired' | 'cancelled' | 'all';
+    limit?: number;
+  }): Promise<SlotOfferListItem[]> {
+    const status = options?.status ?? 'all';
+    const limit = options?.limit ?? 50;
+
+    const result = await db.query<SlotOfferRow & {
+      booking_ref: string | null;
+      service_name: string;
+      staff_name: string;
+      customer_name: string;
+      customer_phone: string;
+      customer_email: string | null;
+    }>(`
+      SELECT
+        o.*,
+        b.ref AS booking_ref,
+        s.name AS service_name,
+        st.name AS staff_name,
+        c.name AS customer_name,
+        c.phone AS customer_phone,
+        c.email AS customer_email
+      FROM slot_offers o
+      JOIN customers c ON c.id = o.customer_id
+      JOIN services s ON s.id = o.service_id
+      JOIN staff st ON st.id = o.staff_id
+      LEFT JOIN bookings b ON b.id = o.booking_id
+      WHERE o.business_id = $1
+        AND ($2::text = 'all' OR o.status = $2)
+      ORDER BY o.created_at DESC
+      LIMIT $3
+    `, [businessId, status, limit]);
+
+    // Mark expired pending offers lazily for accurate dashboard status
+    const now = Date.now();
+    for (const row of result.rows) {
+      if (row.status === 'pending' && new Date(row.expires_at).getTime() <= now) {
+        await db.query(`UPDATE slot_offers SET status = 'expired' WHERE id = $1 AND status = 'pending'`, [row.id]);
+        row.status = 'expired';
+      }
+    }
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      offerType: row.offer_type,
+      status: row.status,
+      offerToken: row.offer_token,
+      slotStartsAt: new Date(row.slot_starts_at).toISOString(),
+      slotEndsAt: new Date(row.slot_ends_at).toISOString(),
+      expiresAt: new Date(row.expires_at).toISOString(),
+      acceptedAt: row.accepted_at ? new Date(row.accepted_at).toISOString() : undefined,
+      createdAt: new Date(row.created_at).toISOString(),
+      incentive: row.incentive ?? undefined,
+      customerName: row.customer_name,
+      customerPhone: row.customer_phone,
+      customerEmail: row.customer_email ?? undefined,
+      serviceName: row.service_name,
+      staffName: row.staff_name,
+      bookingRef: row.booking_ref ?? undefined,
+    }));
+  },
 
   async createRebookOffer(
     booking: Booking,

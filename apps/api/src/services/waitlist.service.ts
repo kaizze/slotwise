@@ -20,7 +20,52 @@ function toWaitlistEntry(row: Record<string, unknown>): WaitlistEntry {
   };
 }
 
+export interface WaitlistListItem extends WaitlistEntry {
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  serviceName: string;
+  staffName?: string;
+  notified: boolean;
+}
+
 export const WaitlistService = {
+
+  async list(businessId: string, options?: {
+    includeNotified?: boolean;
+    limit?: number;
+  }): Promise<WaitlistListItem[]> {
+    const includeNotified = options?.includeNotified ?? false;
+    const limit = options?.limit ?? 50;
+
+    const result = await db.query(`
+      SELECT
+        w.*,
+        c.name AS customer_name,
+        c.phone AS customer_phone,
+        c.email AS customer_email,
+        s.name AS service_name,
+        st.name AS staff_name
+      FROM waitlist w
+      JOIN customers c ON c.id = w.customer_id
+      JOIN services s ON s.id = w.service_id
+      LEFT JOIN staff st ON st.id = w.staff_id
+      WHERE w.business_id = $1
+        AND ($2::boolean OR w.notified = FALSE)
+      ORDER BY w.created_at DESC
+      LIMIT $3
+    `, [businessId, includeNotified, limit]);
+
+    return result.rows.map((row) => ({
+      ...toWaitlistEntry(row),
+      customerName: row.customer_name as string,
+      customerPhone: row.customer_phone as string,
+      customerEmail: (row.customer_email as string | null) ?? undefined,
+      serviceName: row.service_name as string,
+      staffName: (row.staff_name as string | null) ?? undefined,
+      notified: Boolean(row.notified),
+    }));
+  },
 
   async join(input: {
     businessId: string;

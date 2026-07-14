@@ -14,6 +14,7 @@ import { serviceRoutes } from './routes/services.js';
 import { businessRoutes } from './routes/business.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { waitlistRoutes } from './routes/waitlist.js';
+import { offerRoutes } from './routes/offers.js';
 import { db } from './db/client.js';
 import { startNotificationWorker, stopNotificationWorker } from './queues/notification-worker.js';
 
@@ -99,6 +100,7 @@ await server.register(businessRoutes, { prefix: '/api/v1/businesses' });
 await server.register(bookingRoutes,  { prefix: '/api/v1/bookings' });
 await server.register(slotRoutes,     { prefix: '/api/v1/slots' });
 await server.register(waitlistRoutes, { prefix: '/api/v1/waitlist' });
+await server.register(offerRoutes,    { prefix: '/api/v1/offers' });
 await server.register(agentRoutes,    { prefix: '/api/v1/agent' });
 
 // Webhooks (Twilio) are server-to-server — no browser CORS involved at all.

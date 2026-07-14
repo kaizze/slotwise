@@ -18,6 +18,8 @@ interface WidgetState {
   loading: boolean;
   error: string | null;
   bookingRef: string | null;
+  showWaitlistForm: boolean;
+  waitlistJoined: boolean;
 }
 
 export interface SlotWiseWidgetConfig {
@@ -80,6 +82,8 @@ export class SlotWiseWidget {
       loading: false,
       error: null,
       bookingRef: null,
+      showWaitlistForm: false,
+      waitlistJoined: false,
     };
 
     this.render();
@@ -111,10 +115,39 @@ export class SlotWiseWidget {
 
   private async loadSlots(): Promise<void> {
     if (!this.state.selectedService) return;
-    this.setState({ loading: true, error: null, slots: [] });
+    this.setState({
+      loading: true,
+      error: null,
+      slots: [],
+      showWaitlistForm: false,
+      waitlistJoined: false,
+    });
     try {
       const slots = await this.api.getSlots(this.state.selectedService.id, this.state.selectedDate);
       this.setState({ slots, loading: false });
+    } catch (err) {
+      this.setState({ loading: false, error: this.errorMessage(err) });
+    }
+  }
+
+  private async submitWaitlist(): Promise<void> {
+    const { selectedService, selectedDate, customerName, customerPhone, customerEmail } = this.state;
+    if (!selectedService) return;
+    if (customerName.trim().length === 0 || customerPhone.trim().length < 6) {
+      this.setState({ error: 'Name and phone are required.' });
+      return;
+    }
+
+    this.setState({ loading: true, error: null });
+    try {
+      await this.api.joinWaitlist({
+        serviceId: selectedService.id,
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim(),
+        customerEmail: customerEmail.trim() || undefined,
+        preferredDate: selectedDate,
+      });
+      this.setState({ loading: false, waitlistJoined: true, showWaitlistForm: false });
     } catch (err) {
       this.setState({ loading: false, error: this.errorMessage(err) });
     }
@@ -186,6 +219,8 @@ export class SlotWiseWidget {
       customerPhone: '',
       customerEmail: '',
       bookingRef: null,
+      showWaitlistForm: false,
+      waitlistJoined: false,
       error: null,
     });
   }
@@ -301,7 +336,45 @@ export class SlotWiseWidget {
     if (this.state.loading) {
       slotsHtml = `<div class="sw-loading-row"><span class="sw-spinner" style="color: var(--sw-accent);"></span></div>`;
     } else if (this.state.slots.length === 0) {
-      slotsHtml = `<div class="sw-empty">No availability on this day. Try another date.</div>`;
+      if (this.state.waitlistJoined) {
+        slotsHtml = `
+          <div class="sw-empty">
+            <div class="sw-empty-title">You're on the waitlist</div>
+            <div class="sw-empty-sub">We'll email or message you if a slot opens on this day.</div>
+          </div>
+        `;
+      } else if (this.state.showWaitlistForm) {
+        slotsHtml = `
+          <div class="sw-waitlist">
+            <div class="sw-empty-title">Join the waitlist</div>
+            <div class="sw-empty-sub">We'll notify you if something opens on this day.</div>
+            <div class="sw-field">
+              <label for="sw-wl-name">Full name</label>
+              <input id="sw-wl-name" type="text" data-field="customerName" value="${escapeHtml(this.state.customerName)}" autocomplete="name" />
+            </div>
+            <div class="sw-field">
+              <label for="sw-wl-phone">Phone number</label>
+              <input id="sw-wl-phone" type="tel" data-field="customerPhone" value="${escapeHtml(this.state.customerPhone)}" autocomplete="tel" />
+            </div>
+            <div class="sw-field">
+              <label for="sw-wl-email">Email (optional)</label>
+              <input id="sw-wl-email" type="email" data-field="customerEmail" value="${escapeHtml(this.state.customerEmail)}" autocomplete="email" />
+            </div>
+            <button class="sw-button" data-action="submit-waitlist" ${this.canSubmit() ? '' : 'disabled'}>
+              ${this.state.loading ? '<span class="sw-spinner"></span>' : 'Notify me'}
+            </button>
+            <button class="sw-button-secondary" data-action="hide-waitlist">Cancel</button>
+          </div>
+        `;
+      } else {
+        slotsHtml = `
+          <div class="sw-empty">
+            <div class="sw-empty-title">No availability on this day</div>
+            <div class="sw-empty-sub">Try another date, or join the waitlist.</div>
+            <button class="sw-button" data-action="show-waitlist" style="margin-top:14px;">Notify me</button>
+          </div>
+        `;
+      }
     } else {
       slotsHtml = this.state.slots.map((slot) => {
         const time = new Date(slot.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -430,6 +503,15 @@ export class SlotWiseWidget {
           case 'new-booking':
             this.resetForNewBooking();
             break;
+          case 'show-waitlist':
+            this.setState({ showWaitlistForm: true, error: null });
+            break;
+          case 'hide-waitlist':
+            this.setState({ showWaitlistForm: false, error: null });
+            break;
+          case 'submit-waitlist':
+            this.submitWaitlist();
+            break;
         }
       });
     });
@@ -441,7 +523,9 @@ export class SlotWiseWidget {
         this.state = { ...this.state, [field]: value };
         // Don't full re-render on every keystroke (would steal input focus) —
         // just update the submit button's disabled state directly.
-        const submitBtn = container.querySelector('[data-action="submit-booking"]') as HTMLButtonElement | null;
+        const submitBtn = container.querySelector(
+          '[data-action="submit-booking"], [data-action="submit-waitlist"]',
+        ) as HTMLButtonElement | null;
         if (submitBtn) submitBtn.disabled = !this.canSubmit();
       });
     });

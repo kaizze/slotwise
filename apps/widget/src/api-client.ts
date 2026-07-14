@@ -97,4 +97,18 @@ export class SlotWiseApiClient {
       body: JSON.stringify({ businessSlug: this.businessSlug, ...input }),
     });
   }
+
+  async joinWaitlist(input: {
+    serviceId: string;
+    customerName: string;
+    customerPhone: string;
+    customerEmail?: string;
+    preferredDate?: string;
+    staffId?: string;
+  }): Promise<{ id: string }> {
+    return this.request<{ id: string }>(`/api/v1/waitlist`, {
+      method: 'POST',
+      body: JSON.stringify({ businessSlug: this.businessSlug, ...input }),
+    });
+  }
 }

@@ -2,16 +2,19 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import dayjs from 'dayjs';
-import { bookingsApi, ApiError, type DashboardBooking } from '@/lib/api-client';
+import Link from 'next/link';
+import { bookingsApi, offersApi, ApiError, type DashboardBooking, type DashboardSlotOffer } from '@/lib/api-client';
 import { BookingCard } from './BookingCard';
 
 export function DayCalendar() {
   const [selectedDate, setSelectedDate] = useState(() => dayjs().format('YYYY-MM-DD'));
   const [bookings, setBookings] = useState<DashboardBooking[]>([]);
+  const [recentOffers, setRecentOffers] = useState<DashboardSlotOffer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<DashboardBooking | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
 
   const loadDay = useCallback(async (dateIso: string) => {
     setLoading(true);
@@ -19,11 +22,15 @@ export function DayCalendar() {
     try {
       const from = dayjs(dateIso).startOf('day').toISOString();
       const to = dayjs(dateIso).endOf('day').toISOString();
-      const result = await bookingsApi.list(from, to);
+      const [result, offers] = await Promise.all([
+        bookingsApi.list(from, to),
+        offersApi.list('all').catch(() => [] as DashboardSlotOffer[]),
+      ]);
       // Sort by start time — the API already does this, but defend against
       // any future change to that ordering since the UI depends on it.
       result.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
       setBookings(result);
+      setRecentOffers(offers.slice(0, 5));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not load bookings.');
     } finally {
@@ -41,7 +48,13 @@ export function DayCalendar() {
     try {
       await bookingsApi.cancel(cancelTarget.ref);
       setCancelTarget(null);
+      setCancelNotice('Booking cancelled. Checking waitlist and rebook opportunities…');
       await loadDay(selectedDate);
+      // Recovery runs in the background — refresh offers shortly after
+      setTimeout(() => {
+        loadDay(selectedDate);
+        setCancelNotice('If a slot-fill opportunity was found, it appears under Slot filling.');
+      }, 2500);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not cancel booking.');
       setCancelTarget(null);
@@ -73,6 +86,7 @@ export function DayCalendar() {
       </div>
 
       {error && <div style={styles.error}>{error}</div>}
+      {cancelNotice && <div style={styles.notice}>{cancelNotice}</div>}
 
       {loading ? (
         <div style={styles.loadingState}>Loading…</div>
@@ -85,6 +99,23 @@ export function DayCalendar() {
         <div style={styles.list}>
           {bookings.map((b) => (
             <BookingCard key={b.id} booking={b} onCancel={setCancelTarget} />
+          ))}
+        </div>
+      )}
+
+      {recentOffers.length > 0 && (
+        <div style={styles.activitySection}>
+          <div style={styles.activityHeader}>
+            <span style={styles.activityTitle}>Recent slot fills</span>
+            <Link href="/fill" style={styles.activityLink}>View all</Link>
+          </div>
+          {recentOffers.map((o) => (
+            <div key={o.id} style={styles.activityRow}>
+              <span style={styles.activityBadge}>{o.offerType}</span>
+              <span style={styles.activityText}>
+                {o.customerName} · {dayjs(o.slotStartsAt).format('D MMM HH:mm')} · {o.status}
+              </span>
+            </div>
           ))}
         </div>
       )}
@@ -195,6 +226,57 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '9px 12px',
     borderRadius: 'var(--radius-sm)',
     marginBottom: 14,
+  },
+  notice: {
+    background: '#eef2ff',
+    color: 'var(--accent)',
+    fontSize: 13,
+    padding: '9px 12px',
+    borderRadius: 'var(--radius-sm)',
+    marginBottom: 14,
+  },
+  activitySection: {
+    marginTop: 28,
+    borderTop: '1px solid var(--border)',
+    paddingTop: 16,
+  },
+  activityHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  activityTitle: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: 'var(--ink-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.02em',
+  },
+  activityLink: {
+    fontSize: 12,
+    color: 'var(--accent)',
+    textDecoration: 'none',
+  },
+  activityRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '7px 0',
+    borderBottom: '1px solid var(--border)',
+    fontSize: 12,
+  },
+  activityBadge: {
+    fontSize: 10,
+    fontWeight: 500,
+    color: 'var(--accent)',
+    background: '#eef2ff',
+    padding: '2px 6px',
+    borderRadius: 999,
+    textTransform: 'capitalize',
+  },
+  activityText: {
+    color: 'var(--ink-muted)',
   },
   modalOverlay: {
     position: 'fixed',
