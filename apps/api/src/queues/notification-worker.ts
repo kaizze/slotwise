@@ -130,13 +130,14 @@ async function dispatchOne(row: NotificationRow): Promise<void> {
 
     if (!ctx.customerPhone) throw new Error('Customer has no phone number');
 
-    if (row.channel === 'whatsapp') {
-      await sendWhatsApp(ctx.customerPhone, body);
-    } else {
-      await sendSms(ctx.customerPhone, body);
-    }
+    const { providerId } = row.channel === 'whatsapp'
+      ? await sendWhatsApp(ctx.customerPhone, body)
+      : await sendSms(ctx.customerPhone, body);
 
-    await db.query(`UPDATE notifications SET status = 'sent', sent_at = NOW() WHERE id = $1`, [row.id]);
+    await db.query(
+      `UPDATE notifications SET status = 'sent', sent_at = NOW(), provider_id = $2 WHERE id = $1`,
+      [row.id, providerId],
+    );
     return;
   }
 
@@ -197,14 +198,17 @@ async function dispatchOne(row: NotificationRow): Promise<void> {
         throw new Error(`Unknown notification type: ${row.type}`);
     }
 
-    await EmailService.send({
+    const { providerId } = await EmailService.send({
       to: ctx.customerEmail,
       toName: ctx.customerName,
       subject,
       htmlContent: html,
     });
 
-    await db.query(`UPDATE notifications SET status = 'sent', sent_at = NOW() WHERE id = $1`, [row.id]);
+    await db.query(
+      `UPDATE notifications SET status = 'sent', sent_at = NOW(), provider_id = $2 WHERE id = $1`,
+      [row.id, providerId],
+    );
   }
 }
 

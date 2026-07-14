@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { BusinessService } from '../services/business.service.js';
 import { WaitlistService } from '../services/waitlist.service.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const joinWaitlistSchema = z.object({
   businessSlug: z.string(),
@@ -13,8 +14,14 @@ const joinWaitlistSchema = z.object({
   preferredDate: z.string().optional(),
 });
 
+const listQuerySchema = z.object({
+  includeNotified: z.enum(['true', 'false']).optional(),
+  limit: z.coerce.number().int().positive().max(100).optional(),
+});
+
 export async function waitlistRoutes(fastify: FastifyInstance) {
 
+  // Public: join waitlist (widget / agent)
   fastify.post('/', async (request, reply) => {
     const body = joinWaitlistSchema.parse(request.body);
 
@@ -45,5 +52,21 @@ export async function waitlistRoutes(fastify: FastifyInstance) {
     });
 
     return reply.status(201).send({ data: entry });
+  });
+
+  // Admin: list waitlist entries for the authenticated business
+  fastify.get('/', {
+    preHandler: requireAuth,
+    handler: async (request, reply) => {
+      const business = request.business!;
+      const query = listQuerySchema.parse(request.query);
+
+      const entries = await WaitlistService.list(business.id, {
+        includeNotified: query.includeNotified === 'true',
+        limit: query.limit ?? 50,
+      });
+
+      return reply.send({ data: entries });
+    },
   });
 }
