@@ -9,7 +9,8 @@
 #
 # Creates bookings for ONE staff member (09:00–17:00 local), rotating these emails:
 #   m1lonasdm@gmail.com, dm@cloduevo.ai, dimitris@tidesofweb.com
-# Random Greek names + unique phones. Skips already-booked slots.
+# Random Greek names + sequential fake phones (0100000000, 0100000001, ...).
+# Skips already-booked slots.
 
 set -euo pipefail
 
@@ -137,7 +138,8 @@ BEGIN
     v_name  := v_first_names[1 + floor(random() * array_length(v_first_names, 1))::int]
             || ' '
             || v_last_names[1 + floor(random() * array_length(v_last_names, 1))::int];
-    v_phone := '69' || lpad((10000000 + floor(random() * 89999999))::int::text, 8, '0');
+    -- Fake sequential phones — not real Greek mobiles (69… / 68…)
+    v_phone := '010' || lpad(i::text, 7, '0');
     v_email := v_emails[1 + ((i - 1) % array_length(v_emails, 1))];
 
     INSERT INTO customers (id, business_id, name, phone, email, total_bookings)
