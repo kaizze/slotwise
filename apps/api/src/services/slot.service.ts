@@ -207,6 +207,28 @@ export function resolveTimeOfDay(value: string | undefined): TimeOfDay | undefin
   return undefined;
 }
 
+/**
+ * Parse a customer/agent clock time into HH:mm (24h).
+ * Accepts "9:30", "09.30", "9.30am", "21:00", etc.
+ */
+export function resolvePreferredTime(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const raw = value.toLowerCase().trim().replace(/\s+/g, '');
+  const match = raw.match(/^(\d{1,2})[:.](\d{2})(am|pm)?$/);
+  if (!match) return undefined;
+
+  let hour = parseInt(match[1]!, 10);
+  const minute = parseInt(match[2]!, 10);
+  const meridiem = match[3];
+
+  if (minute > 59 || hour > 23) return undefined;
+  if (meridiem === 'pm' && hour < 12) hour += 12;
+  if (meridiem === 'am' && hour === 12) hour = 0;
+  if (!meridiem && hour > 23) return undefined;
+
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
 function slotHourInTz(startsAt: Date, tz: string): number {
   return dayjs(startsAt).tz(tz).hour();
 }
