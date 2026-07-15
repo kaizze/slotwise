@@ -32,11 +32,16 @@ export const CustomerService = {
 
     if (existing) {
       // Keep name/email fresh if provided
-      if (input.name && input.name !== existing.name) {
+      const nextName = input.name || (existing.name as string);
+      const nextEmail = input.email ?? (existing.email as string | null);
+      const nameChanged = nextName !== existing.name;
+      const emailChanged = input.email != null && input.email !== existing.email;
+
+      if (nameChanged || emailChanged) {
         const updated = await db.queryOneOrThrow(`
           UPDATE customers SET name = $2, email = COALESCE($3, email)
           WHERE id = $1 RETURNING *
-        `, [existing.id as string, input.name, input.email ?? null]);
+        `, [existing.id as string, nextName, input.email ?? null]);
         return toCustomer(updated);
       }
       return toCustomer(existing);
