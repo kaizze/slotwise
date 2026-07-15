@@ -49,11 +49,13 @@ async function getChannelPreferences(
     sms_enabled: boolean;
     email_enabled: boolean;
     customer_email: string | null;
+    email_status: string;
   }>(`
     SELECT
       COALESCE((b.settings->>'smsEnabled')::boolean, false) AS sms_enabled,
       COALESCE((b.settings->>'emailEnabled')::boolean, true) AS email_enabled,
-      c.email AS customer_email
+      c.email AS customer_email,
+      COALESCE(c.email_status, 'valid') AS email_status
     FROM businesses b
     JOIN customers c ON c.business_id = b.id
     WHERE b.id = $1 AND c.id = $2
@@ -61,7 +63,10 @@ async function getChannelPreferences(
 
   return {
     sms: result.sms_enabled,
-    email: result.email_enabled && !!result.customer_email,
+    email:
+      result.email_enabled
+      && !!result.customer_email
+      && result.email_status === 'valid',
   };
 }
 

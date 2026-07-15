@@ -5,6 +5,7 @@ import { db } from '../db/client.js';
 import { BusinessService } from '../services/business.service.js';
 import { runAgentTurn } from '../agents/booking-agent.js';
 import { SlotOfferService } from '../services/slot-offer.service.js';
+import { BrevoWebhookService } from '../services/brevo-webhook.service.js';
 
 // ─── Twilio request authenticity check ────────────────────────────────────────
 // Twilio signs every webhook request with HMAC-SHA1 over the full request URL
@@ -191,6 +192,48 @@ export async function webhookRoutes(fastify: FastifyInstance) {
 
       const twiml = await handleInboundMessage(businessSlug, 'sms', body, request.log);
       return reply.status(200).type('text/xml').send(twiml);
+    },
+  });
+
+  // Brevo transactional email delivery events (bounces, spam, blocked).
+  // Secure with ?token=BREVO_WEBHOOK_SECRET (Brevo has no HMAC signature).
+  // Configure in Brevo → Transactional → Settings → Webhook.
+  fastify.post('/brevo/email', {
+    config: { rateLimit: { max: 120, timeWindow: '1 minute' } },
+    handler: async (request, reply) => {
+      const secret = process.env.BREVO_WEBHOOK_SECRET;
+      if (!secret) {
+        request.log.error('Brevo webhook called but BREVO_WEBHOOK_SECRET is not configured');
+        return reply.status(503).send({ error: 'Webhook not configured' });
+      }
+
+      const query = request.query as { token?: string };
+      const headerToken = request.headers['x-brevo-token'];
+      const provided =
+        query.token
+        ?? (typeof headerToken === 'string' ? headerToken : undefined);
+
+      if (!provided || provided !== secret) {
+        request.log.warn('Rejected Brevo webhook with invalid token');
+        return reply.status(403).send({ error: 'Invalid token' });
+      }
+
+      const body = request.body as Record<string, unknown>;
+      // Brevo may send a single event object or a batch array
+      const events = Array.isArray(body) ? body : [body];
+
+      const results = [];
+      for (const event of events) {
+        try {
+          results.push(await BrevoWebhookService.handle(event as Parameters<typeof BrevoWebhookService.handle>[0]));
+        } catch (err) {
+          request.log.error({ err, event }, 'Brevo webhook handler error');
+          results.push({ handled: false, error: true });
+        }
+      }
+
+      // Always 200 so Brevo does not retry storms for unknown message-ids
+      return reply.status(200).send({ ok: true, results });
     },
   });
 }
