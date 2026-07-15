@@ -1,5 +1,5 @@
 import { BookingService } from '../services/booking.service.js';
-import { SlotService, resolveBookingDate, resolveTimeOfDay } from '../services/slot.service.js';
+import { SlotService, resolveBookingDate, resolveTimeOfDay, resolvePreferredTime } from '../services/slot.service.js';
 import { CustomerService } from '../services/customer.service.js';
 import { StaffService } from '../services/staff.service.js';
 import { BusinessService } from '../services/business.service.js';
@@ -66,7 +66,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'get_available_slots',
-    description: 'Get available appointment slots for a date. Returns real times from the calendar — never invent slots.',
+    description: 'Get available appointment slots for a date. Returns real START times (local_time) from the calendar — never invent slots. When the customer asks for a specific clock time (e.g. 9:30), always pass preferred_time so the full day is searched.',
     parameters: {
       type: 'object',
       required: ['service_id'],
@@ -82,6 +82,10 @@ export const AGENT_TOOLS: ToolDefinition[] = [
           enum: ['morning', 'afternoon', 'evening'],
           description: 'Filter to part of day when customer asks — morning (9-13), afternoon (13-17), evening (17+). Greek: πρωί / απόγευμα / βράδυ.',
         },
+        preferred_time: {
+          type: 'string',
+          description: 'Exact start time the customer wants, e.g. "09:30", "9.30", "9:30am". Searches ALL slots that day (not just the top 5).',
+        },
         group_by_staff: {
           type: 'boolean',
           description: 'True when customer asks who is available — one best slot per staff member',
@@ -91,14 +95,14 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'find_or_create_customer',
-    description: 'Look up customer by phone. Creates a new record if not found.',
+    description: 'Look up customer by phone. Creates a new record if not found. Always pass email when the customer provided one (even optional) so confirmation emails can be sent.',
     parameters: {
       type: 'object',
       required: ['phone', 'name'],
       properties: {
         phone: { type: 'string' },
         name: { type: 'string' },
-        email: { type: 'string' },
+        email: { type: 'string', description: 'Optional email for booking confirmations' },
       },
     },
   },
@@ -174,6 +178,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
         name: { type: 'string' },
         service_id: { type: 'string' },
         staff_id: { type: 'string' },
+        email: { type: 'string', description: 'Optional email for waitlist notifications' },
         preferred_date: { type: 'string', description: 'YYYY-MM-DD or natural language like tomorrow' },
       },
     },
@@ -206,9 +211,11 @@ BOOKING FLOW (follow in order):
 2. If they name a staff member, call get_staff to resolve the name.
 3. Call get_available_slots with natural-language dates ("αύριο", "tomorrow").
    - If the customer wants a specific part of the day, pass time_preference: morning / afternoon / evening.
-   - Present the times returned — up to 5 options spread across the day.
-4. Collect name and phone before booking.
-5. Confirm all details, then call create_booking only after explicit confirmation.
+   - If they ask for an exact clock time (e.g. "9:30", "στις 9.30"), ALWAYS pass preferred_time and search again — do not say unavailable just because it was missing from a short list.
+   - For general browsing, present the times returned (up to 5 options). Treat local_time as the START time.
+4. Collect name and phone before booking. Also ask for email (optional) for the confirmation: e.g. "Email for the confirmation? (optional)".
+5. Pass name, phone, and email (if given) to find_or_create_customer.
+6. Confirm all details, then call create_booking only after explicit confirmation.
 
 RULES:
 - Never say a service doesn't exist without calling get_services first. If unsure, call get_services with no query to list all.
@@ -217,6 +224,7 @@ RULES:
 - If slots are empty for one date, try the next business day before saying nothing is available.
 - If a tool returns an error, explain simply and retry with corrected inputs.
 - When presenting booking times to the customer, always use local_time or local_datetime from tool results — never convert starts_at yourself (it is UTC).
+- Email is optional — if the customer declines or skips, continue without it.
 - If the customer says YES/ΝΑΙ after a slot offer notification, call accept_slot_offer with their phone.
 - If no slots are available and they want to be notified, offer join_waitlist.`;
 }
@@ -288,30 +296,62 @@ export async function dispatchTool(
         const dateInput = (toolInput.date as string | undefined) ?? 'today';
         const resolvedDate = resolveBookingDate(dateInput, tz);
         const timeOfDay = resolveTimeOfDay(toolInput.time_preference as string | undefined);
+        const preferredTime = resolvePreferredTime(toolInput.preferred_time as string | undefined);
 
+        // Exact clock-time requests search the full day; general browsing stays capped.
         const slots = await SlotService.getAvailableSlots({
           businessId,
           serviceId,
           date: dateInput,
           staffId,
           groupByStaff: toolInput.group_by_staff as boolean | undefined,
-          timeOfDay,
+          timeOfDay: preferredTime ? undefined : timeOfDay,
           presentation: 'customer',
-          limit: 5,
+          limit: preferredTime ? undefined : 5,
         });
+
+        const mapped = slots.map((s) => ({
+          starts_at: s.startsAt,
+          local_time: dayjs(s.startsAt).tz(tz).format('HH:mm'),
+          ends_at: s.endsAt,
+          staff_id: s.staffId,
+          staff_name: s.staffName,
+        }));
+
+        if (preferredTime) {
+          const exactMatches = mapped.filter((s) => s.local_time === preferredTime);
+          const nearby = mapped
+            .filter((s) => s.local_time !== preferredTime)
+            .sort((a, b) => {
+              const aDiff = Math.abs(
+                dayjs(`2000-01-01T${a.local_time}`).diff(dayjs(`2000-01-01T${preferredTime}`), 'minute'),
+              );
+              const bDiff = Math.abs(
+                dayjs(`2000-01-01T${b.local_time}`).diff(dayjs(`2000-01-01T${preferredTime}`), 'minute'),
+              );
+              return aDiff - bDiff;
+            })
+            .slice(0, 5);
+
+          return JSON.stringify({
+            date_requested: dateInput,
+            date_searched: resolvedDate,
+            preferred_time: preferredTime,
+            preferred_time_available: exactMatches.length > 0,
+            exact_matches: exactMatches,
+            nearby_alternatives: exactMatches.length > 0 ? [] : nearby,
+            note: exactMatches.length > 0
+              ? `Start time ${preferredTime} is available with ${exactMatches.length} staff option(s).`
+              : `Start time ${preferredTime} is not available. Suggest nearby_alternatives.`,
+          });
+        }
 
         return JSON.stringify({
           date_requested: dateInput,
           date_searched: resolvedDate,
           time_filter: timeOfDay ?? 'all day',
-          total_matching: slots.length,
-          slots: slots.map((s) => ({
-            starts_at: s.startsAt,
-            local_time: dayjs(s.startsAt).tz(tz).format('HH:mm'),
-            ends_at: s.endsAt,
-            staff_id: s.staffId,
-            staff_name: s.staffName,
-          })),
+          total_matching: mapped.length,
+          slots: mapped,
         });
       }
 
@@ -453,6 +493,7 @@ export async function dispatchTool(
           serviceId,
           customerName: toolInput.name as string,
           customerPhone: toolInput.phone as string,
+          customerEmail: toolInput.email as string | undefined,
           staffId: toolInput.staff_id as string | undefined,
           preferredWindowStart,
           preferredWindowEnd,
