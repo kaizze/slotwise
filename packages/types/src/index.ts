@@ -126,12 +126,15 @@ export type BookingChannel =
 
 // ─── Customers ───────────────────────────────────────────────────────────────
 
+export type CustomerEmailStatus = 'valid' | 'invalid' | 'complained';
+
 export interface Customer {
   id: string;
   businessId: string;
   name: string;
   phone: string;
   email?: string;
+  emailStatus?: CustomerEmailStatus;
   noShowCount: number;
   totalBookings: number;
   createdAt: Date;
