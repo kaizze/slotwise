@@ -188,11 +188,25 @@ export const AGENT_TOOLS: ToolDefinition[] = [
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
-export function buildSystemPrompt(business: Pick<Business, 'name' | 'type' | 'locale' | 'settings' | 'timezone'>): string {
+export function buildSystemPrompt(
+  business: Pick<Business, 'name' | 'type' | 'locale' | 'settings' | 'timezone'>,
+  authenticatedCustomer?: { name: string; phone: string; email?: string },
+): string {
   const defaultLanguage = business.locale === 'el' ? 'Greek' : 'English';
   const now = dayjs().tz(business.timezone);
   const today = now.format('YYYY-MM-DD (dddd)');
   const tomorrow = now.add(1, 'day').format('YYYY-MM-DD (dddd)');
+  const authenticatedCustomerBlock = authenticatedCustomer
+    ? `
+
+SIGNED-IN CUSTOMER:
+- Name: ${authenticatedCustomer.name}
+- Phone: ${authenticatedCustomer.phone}
+- Email: ${authenticatedCustomer.email ?? 'not provided'}
+- These details are verified from the customer's account for this business.
+- Reuse them for booking / lookup / waitlist flows unless the customer explicitly asks to use different details.
+- If you already have the signed-in customer's phone, do not ask for it again unless needed to confirm a change.`
+    : '';
 
   return `You are the booking assistant for ${business.name} (${business.type}).
 
@@ -232,7 +246,7 @@ RULES:
 - When presenting booking times to the customer, always use local_time or local_datetime from tool results — never convert starts_at yourself (it is UTC).
 - Email is optional — if the customer declines or skips, continue without it.
 - If the customer says YES/ΝΑΙ after a slot offer notification, call accept_slot_offer with their phone.
-- If no slots are available and they want to be notified, offer join_waitlist.`;
+- If no slots are available and they want to be notified, offer join_waitlist.${authenticatedCustomerBlock}`;
 }
 
 // ─── Tool dispatcher ──────────────────────────────────────────────────────────

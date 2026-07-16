@@ -59,6 +59,12 @@ export interface CustomerAuthResult {
   accessToken: string;
 }
 
+export interface AgentChatResult {
+  reply: string;
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  history: unknown[];
+}
+
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
     super(message);
@@ -159,5 +165,18 @@ export class SlotWiseApiClient {
 
   async getCustomerMe(): Promise<{ customer: ApiCustomer }> {
     return this.request<{ customer: ApiCustomer }>(`/api/v1/customer-auth/me`);
+  }
+
+  async chatWithAgent(input: {
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    history?: unknown[];
+  }): Promise<AgentChatResult> {
+    return this.request<AgentChatResult>(`/api/v1/agent/${this.businessSlug}/chat`, {
+      method: 'POST',
+      body: JSON.stringify({
+        messages: input.messages,
+        ...(input.history && input.history.length > 0 ? { history: input.history } : {}),
+      }),
+    });
   }
 }

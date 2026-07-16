@@ -10,6 +10,8 @@ import {
 } from '../agents/booking-agent.js';
 import type { AgentTurnMessage } from '../agents/llm-types.js';
 import { messageFromText } from '../agents/llm-types.js';
+import { optionalCustomerAuth } from '../middleware/customer-auth.js';
+import { CustomerAuthService } from '../services/customer-auth.service.js';
 
 // ─── Route registration ───────────────────────────────────────────────────────
 
@@ -29,6 +31,7 @@ const chatBodySchema = z.object({
 export async function agentRoutes(fastify: FastifyInstance) {
   fastify.post('/:businessSlug/chat', {
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+    preHandler: optionalCustomerAuth,
     handler: async (request, reply) => {
       try {
       const { businessSlug } = request.params as { businessSlug: string };
@@ -43,7 +46,21 @@ export async function agentRoutes(fastify: FastifyInstance) {
         return reply.status(403).send({ error: 'AI agent not enabled for this business' });
       }
 
-      const systemPrompt = buildSystemPrompt(business);
+      const signedInCustomer =
+        request.authCustomer?.businessId === business.id
+          ? await CustomerAuthService.getById(request.authCustomer.customerId)
+          : null;
+
+      const systemPrompt = buildSystemPrompt(
+        business,
+        signedInCustomer
+          ? {
+              name: signedInCustomer.name,
+              phone: signedInCustomer.phone,
+              email: signedInCustomer.email,
+            }
+          : undefined,
+      );
 
       let agentMessages: AgentTurnMessage[];
 
