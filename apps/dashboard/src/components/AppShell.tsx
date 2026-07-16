@@ -20,8 +20,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   async function handleLogout() {
-    await logout();
-    router.push('/login');
+    try {
+      await logout();
+    } finally {
+      router.replace('/login');
+    }
   }
 
   return (
@@ -47,7 +50,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           <div style={styles.railFooter}>
             {user && <div style={styles.userName}>{user.name}</div>}
-            <button style={styles.logoutButton} onClick={handleLogout}>
+            <button type="button" style={styles.logoutButton} onClick={handleLogout}>
               Sign out
             </button>
           </div>

@@ -68,8 +68,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    await authApi.logout();
-    setState({ user: null, business: null, status: 'unauthenticated' });
+    try {
+      await authApi.logout();
+    } finally {
+      // Always clear local auth so Sign out never appears stuck.
+      setState({ user: null, business: null, status: 'unauthenticated' });
+    }
   };
 
   return (
