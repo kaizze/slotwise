@@ -451,3 +451,65 @@ export const analyticsApi = {
     return request<TodayOverview>('/api/v1/analytics/today');
   },
 };
+
+export interface CrmCustomerSummary {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  lastVisitAt: string | null;
+  totalSpent: number;
+  currency: string;
+  bookingsCount: number;
+  noShows: number;
+  notes?: string;
+  preferences?: string;
+  favouriteStaffId?: string | null;
+  favouriteEmployee?: { id: string; name: string } | null;
+  createdAt: string;
+}
+
+export interface CrmCustomerDetail extends CrmCustomerSummary {
+  emailStatus?: string;
+  recentBookings: Array<{
+    id: string;
+    ref: string;
+    startsAt: string;
+    endsAt: string;
+    status: string;
+    serviceName: string;
+    staffName: string;
+    price: number;
+  }>;
+}
+
+export const customersApi = {
+  async list(query?: string): Promise<{ customers: CrmCustomerSummary[]; total: number }> {
+    const params = new URLSearchParams();
+    if (query?.trim()) params.set('q', query.trim());
+    const qs = params.toString();
+    return request<{ customers: CrmCustomerSummary[]; total: number; limit: number; offset: number }>(
+      `/api/v1/customers${qs ? `?${qs}` : ''}`,
+    );
+  },
+
+  async get(id: string): Promise<CrmCustomerDetail> {
+    return request<CrmCustomerDetail>(`/api/v1/customers/${id}`);
+  },
+
+  async update(
+    id: string,
+    updates: {
+      name?: string;
+      email?: string | null;
+      notes?: string | null;
+      preferences?: string | null;
+      favouriteStaffId?: string | null;
+    },
+  ): Promise<CrmCustomerDetail> {
+    return request<CrmCustomerDetail>(`/api/v1/customers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+  },
+};

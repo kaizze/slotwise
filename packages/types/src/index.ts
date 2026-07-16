@@ -138,6 +138,9 @@ export interface Customer {
   emailStatus?: CustomerEmailStatus;
   noShowCount: number;
   totalBookings: number;
+  notes?: string;
+  preferences?: string;
+  favouriteStaffId?: string;
   createdAt: Date;
 }
 

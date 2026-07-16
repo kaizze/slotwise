@@ -9,6 +9,7 @@ import type { ReactNode } from 'react';
 const NAV_ITEMS = [
   { href: '/', label: 'Today' },
   { href: '/calendar', label: 'Calendar' },
+  { href: '/customers', label: 'Customers' },
   { href: '/analytics', label: 'Analytics' },
   { href: '/waitlist', label: 'Waitlist' },
   { href: '/fill', label: 'Slot filling' },
@@ -38,7 +39,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           <nav style={styles.nav}>
             {NAV_ITEMS.map((item) => {
-              const isActive = pathname === item.href;
+              const isActive =
+                item.href === '/'
+                  ? pathname === '/'
+                  : pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
                 <Link
                   key={item.href}
