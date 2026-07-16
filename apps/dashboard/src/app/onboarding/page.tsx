@@ -152,8 +152,11 @@ function OnboardingWizard() {
   }
 
   async function handleSignOut() {
-    await logout();
-    router.push('/login');
+    try {
+      await logout();
+    } finally {
+      router.replace('/login');
+    }
   }
 
   if (loading) {
