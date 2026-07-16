@@ -238,15 +238,16 @@ export const BookingService = {
   },
 
   /**
-   * Admin marks a confirmed booking as no-show. Increments the customer's
+   * Admin marks a booking as no-show. Increments the customer's
    * no_show_count so future noShowRisk scoring reflects the history.
-   * Only confirmed bookings can be marked (before auto-complete runs).
+   * Allowed from confirmed or completed (auto-complete must not block this).
    */
   async markNoShow(businessId: string, ref: string): Promise<Booking> {
     const result = await db.query<BookingRow>(`
       UPDATE bookings
       SET status = 'no_show', updated_at = NOW()
-      WHERE ref = $1 AND business_id = $2 AND status = 'confirmed'
+      WHERE ref = $1 AND business_id = $2
+        AND status IN ('confirmed', 'completed')
       RETURNING *
     `, [ref, businessId]);
 
