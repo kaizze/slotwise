@@ -240,7 +240,8 @@ export const BookingService = {
     const result = await db.query<BookingRow>(`
       UPDATE bookings
       SET status = 'cancelled', notes = COALESCE(notes || ' | ' || $3, notes), updated_at = NOW()
-      WHERE ref = $1 AND business_id = $2 AND status = 'confirmed'
+      WHERE ref = $1 AND business_id = $2
+        AND status IN ('confirmed', 'pending', 'requested')
       RETURNING *
     `, [ref, businessId, reason ?? null]);
 
