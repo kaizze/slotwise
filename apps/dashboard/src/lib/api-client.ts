@@ -163,11 +163,14 @@ async function tryRefresh(): Promise<boolean> {
 }
 
 async function request<T>(path: string, init?: RequestInit, isRetry = false): Promise<T> {
+  // Only set JSON content-type when there is a body. Fastify rejects empty
+  // bodies with Content-Type: application/json (breaks logout / other POSTs).
+  const hasBody = init?.body != null && init.body !== '';
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...init?.headers,
     },
@@ -178,6 +181,14 @@ async function request<T>(path: string, init?: RequestInit, isRetry = false): Pr
     if (refreshed) {
       return request<T>(path, init, true);
     }
+  }
+
+  // 204/205 have no body — don't try to parse JSON
+  if (response.status === 204 || response.status === 205) {
+    if (!response.ok) {
+      throw new ApiError('Request failed', response.status);
+    }
+    return undefined as T;
   }
 
   const body = await response.json().catch(() => ({}));
@@ -220,8 +231,13 @@ export const authApi = {
   },
 
   async logout() {
-    await request('/api/v1/auth/logout', { method: 'POST' });
-    setAccessToken(null);
+    try {
+      await request('/api/v1/auth/logout', { method: 'POST' });
+    } catch {
+      // Still drop the local session if the network/API call fails.
+    } finally {
+      setAccessToken(null);
+    }
   },
 
   /** Called on app boot — attempts silent re-auth via the refresh cookie. */
