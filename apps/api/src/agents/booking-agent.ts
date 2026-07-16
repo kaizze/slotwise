@@ -84,7 +84,8 @@ export const AGENT_TOOLS: ToolDefinition[] = [
         },
         preferred_time: {
           type: 'string',
-          description: 'Exact start time the customer wants, e.g. "09:30", "9.30", "9:30am". Searches ALL slots that day (not just the top 5).',
+          description:
+            'Clock time the customer wants (exact or approximate), e.g. "11:00", "11.00", "11", "κοντά στις 11". Searches ALL slots that day (not just the top 5) and returns exact_matches or nearby_alternatives.',
         },
         group_by_staff: {
           type: 'boolean',
@@ -211,7 +212,12 @@ BOOKING FLOW (follow in order):
 2. If they name a staff member, call get_staff to resolve the name.
 3. Call get_available_slots with natural-language dates ("αύριο", "tomorrow").
    - If the customer wants a specific part of the day, pass time_preference: morning / afternoon / evening.
-   - If they ask for an exact clock time (e.g. "9:30", "στις 9.30"), ALWAYS pass preferred_time and search again — do not say unavailable just because it was missing from a short list.
+   - If they ask for a clock time — exact OR approximate ("9:30", "στις 11", "κοντά στις 11.00", "around 11") — ALWAYS call get_available_slots again with preferred_time. Never judge availability from a previous short list.
+   - Preferred-time tool results use status:
+       • available_exact — that clock time IS free. Confirm it and list options (local_time + staff). Never say unavailable / "δυστυχώς" / "όχι ακριβώς".
+       • nearby_only — that clock time is taken. Offer options, each with its own local_time (do not claim they are at the requested time).
+       • none — truly nothing nearby; suggest another day or waitlist.
+   - Always show local_time next to each option. Never list staff names alone.
    - For general browsing, present the times returned (up to 5 options). Treat local_time as the START time.
 4. Collect name and phone before booking. Also ask for email (optional) for the confirmation: e.g. "Email for the confirmation? (optional)".
 5. Pass name, phone, and email (if given) to find_or_create_customer.
@@ -296,9 +302,10 @@ export async function dispatchTool(
         const dateInput = (toolInput.date as string | undefined) ?? 'today';
         const resolvedDate = resolveBookingDate(dateInput, tz);
         const timeOfDay = resolveTimeOfDay(toolInput.time_preference as string | undefined);
-        const preferredTime = resolvePreferredTime(toolInput.preferred_time as string | undefined);
+        const preferredRaw = toolInput.preferred_time as string | undefined;
+        const preferredTime = resolvePreferredTime(preferredRaw);
 
-        // Exact clock-time requests search the full day; general browsing stays capped.
+        // Clock-time requests (exact or approximate) search the full day; general browsing stays capped.
         const slots = await SlotService.getAvailableSlots({
           businessId,
           serviceId,
@@ -307,7 +314,7 @@ export async function dispatchTool(
           groupByStaff: toolInput.group_by_staff as boolean | undefined,
           timeOfDay: preferredTime ? undefined : timeOfDay,
           presentation: 'customer',
-          limit: preferredTime ? undefined : 5,
+          limit: preferredTime || preferredRaw ? undefined : 5,
         });
 
         const mapped = slots.map((s) => ({
@@ -317,6 +324,15 @@ export async function dispatchTool(
           staff_id: s.staffId,
           staff_name: s.staffName,
         }));
+
+        if (preferredRaw && !preferredTime) {
+          return JSON.stringify({
+            date_requested: dateInput,
+            date_searched: resolvedDate,
+            error: `Could not parse preferred_time "${preferredRaw}". Retry with HH:mm (e.g. "11:00").`,
+            slots: mapped.slice(0, 5),
+          });
+        }
 
         if (preferredTime) {
           const exactMatches = mapped.filter((s) => s.local_time === preferredTime);
@@ -333,16 +349,41 @@ export async function dispatchTool(
             })
             .slice(0, 5);
 
+          // Single status + options so the model can't mix "unavailable" with exact slots.
+          if (exactMatches.length > 0) {
+            return JSON.stringify({
+              date_requested: dateInput,
+              date_searched: resolvedDate,
+              status: 'available_exact',
+              preferred_time: preferredTime,
+              options: exactMatches,
+              how_to_reply:
+                `${preferredTime} IS available. Confirm that time is free and list options as "local_time with staff_name". ` +
+                `Do NOT say it is unavailable, "unfortunately", or "not exactly" — that would be wrong.`,
+            });
+          }
+
+          if (nearby.length > 0) {
+            return JSON.stringify({
+              date_requested: dateInput,
+              date_searched: resolvedDate,
+              status: 'nearby_only',
+              preferred_time: preferredTime,
+              options: nearby,
+              how_to_reply:
+                `${preferredTime} is not free. Offer the closest alternatives. ` +
+                `Every option MUST include its own local_time (they are NOT at ${preferredTime}). ` +
+                `Do not invent ${preferredTime} availability.`,
+            });
+          }
+
           return JSON.stringify({
             date_requested: dateInput,
             date_searched: resolvedDate,
+            status: 'none',
             preferred_time: preferredTime,
-            preferred_time_available: exactMatches.length > 0,
-            exact_matches: exactMatches,
-            nearby_alternatives: exactMatches.length > 0 ? [] : nearby,
-            note: exactMatches.length > 0
-              ? `Start time ${preferredTime} is available with ${exactMatches.length} staff option(s).`
-              : `Start time ${preferredTime} is not available. Suggest nearby_alternatives.`,
+            options: [],
+            how_to_reply: `No slots that day near ${preferredTime}. Suggest another day or join_waitlist.`,
           });
         }
 

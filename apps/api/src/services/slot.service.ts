@@ -207,26 +207,55 @@ export function resolveTimeOfDay(value: string | undefined): TimeOfDay | undefin
   return undefined;
 }
 
+function formatPreferredTime(
+  hour: number,
+  minute: number,
+  meridiem?: string
+): string | undefined {
+  if (minute > 59 || hour > 23 || hour < 0) return undefined;
+  let h = hour;
+  if (meridiem === 'pm' && h < 12) h += 12;
+  if (meridiem === 'am' && h === 12) h = 0;
+  if (!meridiem && h > 23) return undefined;
+  return `${String(h).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
 /**
  * Parse a customer/agent clock time into HH:mm (24h).
- * Accepts "9:30", "09.30", "9.30am", "21:00", etc.
+ * Accepts "9:30", "09.30", "11", "στις 11.00", "κοντά στις 11", "around 11:00", etc.
  */
 export function resolvePreferredTime(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  const raw = value.toLowerCase().trim().replace(/\s+/g, '');
-  const match = raw.match(/^(\d{1,2})[:.](\d{2})(am|pm)?$/);
-  if (!match) return undefined;
 
-  let hour = parseInt(match[1]!, 10);
-  const minute = parseInt(match[2]!, 10);
-  const meridiem = match[3];
+  // Collapse spaces; treat comma as a minute separator (Greek "11,00").
+  const collapsed = value
+    .toLowerCase()
+    .trim()
+    .replace(/,/g, '.')
+    .replace(/\s+/g, '');
 
-  if (minute > 59 || hour > 23) return undefined;
-  if (meridiem === 'pm' && hour < 12) hour += 12;
-  if (meridiem === 'am' && hour === 12) hour = 0;
-  if (!meridiem && hour > 23) return undefined;
+  // Prefer an explicit minutes form anywhere in the string.
+  const withMinutes = collapsed.match(/(\d{1,2})[:.](\d{2})(am|pm)?/);
+  if (withMinutes) {
+    return formatPreferredTime(
+      parseInt(withMinutes[1]!, 10),
+      parseInt(withMinutes[2]!, 10),
+      withMinutes[3],
+    );
+  }
 
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  // Hour-only after stripping "near/around/στις/κοντά…" filler words.
+  const hourOnly = collapsed
+    .replace(
+      /κοντά|κοντα|στις|στην|στο|γύρω|γυρω|περίπου|περιπου|around|near|about|at|time|ώρες|ωρες/g,
+      '',
+    )
+    .match(/^(\d{1,2})(am|pm)?$/);
+  if (hourOnly) {
+    return formatPreferredTime(parseInt(hourOnly[1]!, 10), 0, hourOnly[2]);
+  }
+
+  return undefined;
 }
 
 function slotHourInTz(startsAt: Date, tz: string): number {
