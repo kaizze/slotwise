@@ -208,6 +208,8 @@ export const authApi = {
     ownerName: string;
     ownerEmail: string;
     ownerPassword: string;
+    timezone?: string;
+    locale?: string;
   }) {
     const data = await request<{ user: DashboardUser; business: DashboardBusiness; accessToken: string }>(
       '/api/v1/auth/signup',

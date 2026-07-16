@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { RequireSetup } from '@/components/RequireSetup';
 import type { ReactNode } from 'react';
 
 const NAV_ITEMS = [
@@ -24,35 +25,37 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div style={styles.shell}>
-      <aside style={styles.rail}>
-        <div style={styles.brand}>{business?.name ?? 'SlotWise'}</div>
+    <RequireSetup>
+      <div style={styles.shell}>
+        <aside style={styles.rail}>
+          <div style={styles.brand}>{business?.name ?? 'SlotWise'}</div>
 
-        <nav style={styles.nav}>
-          {NAV_ITEMS.map((item) => {
-            const isActive = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                style={isActive ? styles.navItemActive : styles.navItem}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
+          <nav style={styles.nav}>
+            {NAV_ITEMS.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  style={isActive ? styles.navItemActive : styles.navItem}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
 
-        <div style={styles.railFooter}>
-          {user && <div style={styles.userName}>{user.name}</div>}
-          <button style={styles.logoutButton} onClick={handleLogout}>
-            Sign out
-          </button>
-        </div>
-      </aside>
+          <div style={styles.railFooter}>
+            {user && <div style={styles.userName}>{user.name}</div>}
+            <button style={styles.logoutButton} onClick={handleLogout}>
+              Sign out
+            </button>
+          </div>
+        </aside>
 
-      <main style={styles.main}>{children}</main>
-    </div>
+        <main style={styles.main}>{children}</main>
+      </div>
+    </RequireSetup>
   );
 }
 

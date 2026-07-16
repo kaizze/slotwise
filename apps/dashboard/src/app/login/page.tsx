@@ -1,18 +1,35 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
+import { fetchSetupStatus } from '@/lib/onboarding';
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, status } = useAuth();
   const router = useRouter();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    let cancelled = false;
+    fetchSetupStatus()
+      .then((setup) => {
+        if (!cancelled) router.replace(setup.complete ? '/' : '/onboarding');
+      })
+      .catch(() => {
+        if (!cancelled) router.replace('/');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, router]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -21,7 +38,8 @@ export default function LoginPage() {
 
     try {
       await login(email, password);
-      router.push('/');
+      const setup = await fetchSetupStatus();
+      router.push(setup.complete ? '/' : '/onboarding');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not sign in. Please try again.');
     } finally {
@@ -62,6 +80,11 @@ export default function LoginPage() {
         <button type="submit" style={styles.button} disabled={submitting}>
           {submitting ? 'Signing in…' : 'Sign in'}
         </button>
+
+        <p style={styles.footer}>
+          New business?{' '}
+          <Link href="/signup" style={styles.link}>Create an account</Link>
+        </p>
       </form>
     </div>
   );
@@ -126,5 +149,16 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '9px 11px',
     borderRadius: 'var(--radius-sm)',
     marginBottom: 4,
+  },
+  footer: {
+    margin: '18px 0 0',
+    textAlign: 'center',
+    fontSize: 13,
+    color: 'var(--ink-muted)',
+  },
+  link: {
+    color: 'var(--accent)',
+    fontWeight: 500,
+    textDecoration: 'none',
   },
 };
