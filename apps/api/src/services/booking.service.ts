@@ -273,7 +273,11 @@ export const BookingService = {
     const freedStart = new Date(cancelledBooking.starts_at);
     const freedEnd = new Date(cancelledBooking.ends_at);
 
-    // 1. Check waitlist first — one customer at a time
+    // 1. Check waitlist first — one customer at a time.
+    // Prefer entries whose service fits the freed slot duration.
+    const freedMinutes = Math.round(
+      (freedEnd.getTime() - freedStart.getTime()) / 60_000,
+    );
     const waitlisted = await db.query<WaitlistEntryRow>(`
       SELECT w.*, c.phone, c.name, s.name AS service_name
       FROM waitlist w
@@ -284,9 +288,10 @@ export const BookingService = {
         AND (w.staff_id IS NULL OR w.staff_id = $2)
         AND (w.preferred_window_start IS NULL OR w.preferred_window_start <= $3)
         AND (w.preferred_window_end IS NULL OR w.preferred_window_end >= $3)
+        AND s.duration_minutes <= $4
       ORDER BY w.created_at ASC
       LIMIT 1
-    `, [businessId, cancelledBooking.staff_id, freedStart]);
+    `, [businessId, cancelledBooking.staff_id, freedStart, freedMinutes]);
 
     if (waitlisted.rows.length > 0) {
       const entry = waitlisted.rows[0]!;

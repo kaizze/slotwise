@@ -134,6 +134,21 @@ export interface AnalyticsReport {
   byChannel: AnalyticsBucket[];
 }
 
+export interface TodayOverview {
+  date: string;
+  timezone: string;
+  currency: string;
+  totals: {
+    bookingsToday: number;
+    revenueToday: number;
+    occupancyPercent: number | null;
+    upcomingIn30Min: number;
+    waitlistActive: number;
+    cancelledToday: number;
+  };
+  timeline: DashboardBooking[];
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
 export class ApiError extends Error {
@@ -406,6 +421,10 @@ export const waitlistApi = {
     const qs = params.toString();
     return request<DashboardWaitlistEntry[]>(`/api/v1/waitlist${qs ? `?${qs}` : ''}`);
   },
+
+  async remove(id: string): Promise<void> {
+    await request(`/api/v1/waitlist/${id}`, { method: 'DELETE' });
+  },
 };
 
 export const offersApi = {
@@ -419,5 +438,9 @@ export const analyticsApi = {
   async get(from: string, to: string): Promise<AnalyticsReport> {
     const params = new URLSearchParams({ from, to });
     return request<AnalyticsReport>(`/api/v1/analytics?${params}`);
+  },
+
+  async today(): Promise<TodayOverview> {
+    return request<TodayOverview>('/api/v1/analytics/today');
   },
 };

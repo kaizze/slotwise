@@ -2,13 +2,13 @@
 
 import { RequireAuth } from '@/components/RequireAuth';
 import { AppShell } from '@/components/AppShell';
-import { OverviewPage } from '@/components/OverviewPage';
+import { WaitlistPage } from '@/components/WaitlistPage';
 
-export default function HomePage() {
+export default function WaitlistRoute() {
   return (
     <RequireAuth>
       <AppShell>
-        <OverviewPage />
+        <WaitlistPage />
       </AppShell>
     </RequireAuth>
   );

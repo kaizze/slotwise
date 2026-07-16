@@ -5,6 +5,7 @@ import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
 import { requireAuth } from '../middleware/auth.js';
 import { AnalyticsService } from '../services/analytics.service.js';
+import { OverviewService } from '../services/overview.service.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -16,6 +17,13 @@ const querySchema = z.object({
 
 export async function analyticsRoutes(fastify: FastifyInstance) {
   fastify.addHook('preHandler', requireAuth);
+
+  // GET /api/v1/analytics/today — home overview metrics + timeline
+  fastify.get('/today', async (request, reply) => {
+    const business = request.business!;
+    const overview = await OverviewService.getToday(business.id);
+    return reply.send({ data: overview });
+  });
 
   // GET /api/v1/analytics?from=YYYY-MM-DD&to=YYYY-MM-DD
   fastify.get('/', async (request, reply) => {

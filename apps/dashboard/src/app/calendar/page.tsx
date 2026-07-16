@@ -2,13 +2,13 @@
 
 import { RequireAuth } from '@/components/RequireAuth';
 import { AppShell } from '@/components/AppShell';
-import { OverviewPage } from '@/components/OverviewPage';
+import { DayCalendar } from '@/components/DayCalendar';
 
-export default function HomePage() {
+export default function CalendarPage() {
   return (
     <RequireAuth>
       <AppShell>
-        <OverviewPage />
+        <DayCalendar />
       </AppShell>
     </RequireAuth>
   );

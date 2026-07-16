@@ -192,6 +192,12 @@ export const SlotOfferService = {
       computeExpiresAt(input.slotStartsAt),
     ]);
 
+    // Leave the active waitlist as soon as we offer a slot (not only on accept).
+    await db.query(
+      'UPDATE waitlist SET notified = TRUE WHERE id = $1 AND business_id = $2',
+      [input.waitlistId, input.businessId],
+    );
+
     return { offerId: row.id, offerToken: row.offer_token };
   },
 
