@@ -2,6 +2,7 @@ import { db } from '../db/client.js';
 import { sendSms, sendWhatsApp } from '../services/providers/twilio.provider.js';
 import { EmailService } from '../services/email.service.js';
 import { smsTemplates, emailTemplates } from '../services/notification-templates.js';
+import { BookingService } from '../services/booking.service.js';
 
 interface NotificationRow {
   id: string;
@@ -278,6 +279,17 @@ export function startNotificationWorker(): void {
     } catch (err) {
       console.error('[notification-worker] Batch processing error:', err);
     }
+
+    // Auto-complete confirmed bookings 30+ minutes past end (unless marked no-show).
+    try {
+      const completed = await BookingService.autoCompleteEnded();
+      if (completed > 0) {
+        console.info(`[notification-worker] Auto-completed ${completed} booking(s)`);
+      }
+    } catch (err) {
+      console.error('[notification-worker] Auto-complete error:', err);
+    }
+
     if (running) timer = setTimeout(tick, POLL_INTERVAL_MS);
   };
 

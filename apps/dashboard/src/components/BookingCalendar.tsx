@@ -68,7 +68,9 @@ export function BookingCalendar() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<DashboardBooking | null>(null);
+  const [noShowTarget, setNoShowTarget] = useState<DashboardBooking | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [markingNoShow, setMarkingNoShow] = useState(false);
   const [cancelNotice, setCancelNotice] = useState<string | null>(null);
 
   const anchor = useMemo(() => dayjs(selectedDate), [selectedDate]);
@@ -139,6 +141,22 @@ export function BookingCalendar() {
     }
   }
 
+  async function confirmNoShow() {
+    if (!noShowTarget) return;
+    setMarkingNoShow(true);
+    try {
+      await bookingsApi.markNoShow(noShowTarget.ref);
+      setNoShowTarget(null);
+      setCancelNotice('Marked as no-show. Customer profile updated.');
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not mark no-show.');
+      setNoShowTarget(null);
+    } finally {
+      setMarkingNoShow(false);
+    }
+  }
+
   const title = useMemo(() => {
     if (view === 'day') return anchor.format('dddd, D MMMM YYYY');
     if (view === 'week') {
@@ -203,6 +221,7 @@ export function BookingCalendar() {
             <DayView
               bookings={bookings}
               onCancel={setCancelTarget}
+              onMarkNoShow={setNoShowTarget}
             />
           )}
           {view === 'week' && (
@@ -227,6 +246,7 @@ export function BookingCalendar() {
               to={range.to}
               byDay={byDay}
               onCancel={setCancelTarget}
+              onMarkNoShow={setNoShowTarget}
             />
           )}
         </>
@@ -268,6 +288,26 @@ export function BookingCalendar() {
           </div>
         </div>
       )}
+
+      {noShowTarget && (
+        <div style={styles.modalOverlay} onClick={() => !markingNoShow && setNoShowTarget(null)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalTitle}>Mark as no-show?</div>
+            <div style={styles.modalBody}>
+              {noShowTarget.customerName ?? 'This customer'} missed {noShowTarget.serviceName ?? 'their appointment'} at{' '}
+              {dayjs(noShowTarget.startsAt).format('HH:mm')}. This updates their no-show history and future risk score.
+            </div>
+            <div style={styles.modalActions}>
+              <button type="button" style={styles.modalSecondaryButton} onClick={() => setNoShowTarget(null)} disabled={markingNoShow}>
+                Back
+              </button>
+              <button type="button" style={styles.modalNoShowButton} onClick={confirmNoShow} disabled={markingNoShow}>
+                {markingNoShow ? 'Saving…' : 'Mark no-show'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -275,9 +315,11 @@ export function BookingCalendar() {
 function DayView({
   bookings,
   onCancel,
+  onMarkNoShow,
 }: {
   bookings: DashboardBooking[];
   onCancel: (b: DashboardBooking) => void;
+  onMarkNoShow: (b: DashboardBooking) => void;
 }) {
   if (bookings.length === 0) {
     return (
@@ -290,7 +332,7 @@ function DayView({
   return (
     <div style={styles.list}>
       {bookings.map((b) => (
-        <BookingCard key={b.id} booking={b} onCancel={onCancel} />
+        <BookingCard key={b.id} booking={b} onCancel={onCancel} onMarkNoShow={onMarkNoShow} />
       ))}
     </div>
   );
@@ -454,11 +496,13 @@ function AgendaView({
   to,
   byDay,
   onCancel,
+  onMarkNoShow,
 }: {
   from: Dayjs;
   to: Dayjs;
   byDay: Map<string, DashboardBooking[]>;
   onCancel: (b: DashboardBooking) => void;
+  onMarkNoShow: (b: DashboardBooking) => void;
 }) {
   const days: Dayjs[] = [];
   let cursor = from.startOf('day');
@@ -491,7 +535,7 @@ function AgendaView({
               <span style={styles.agendaCount}>{list.length}</span>
             </h3>
             {list.map((b) => (
-              <BookingCard key={b.id} booking={b} onCancel={onCancel} />
+              <BookingCard key={b.id} booking={b} onCancel={onCancel} onMarkNoShow={onMarkNoShow} />
             ))}
           </section>
         );
@@ -921,6 +965,17 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 'var(--radius-sm)',
     border: 'none',
     background: 'var(--danger)',
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  modalNoShowButton: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 'var(--radius-sm)',
+    border: 'none',
+    background: '#3f3f46',
     color: '#fff',
     fontSize: 13,
     fontWeight: 600,

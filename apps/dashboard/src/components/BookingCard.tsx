@@ -2,31 +2,27 @@
 
 import dayjs from 'dayjs';
 import type { DashboardBooking } from '@/lib/api-client';
-import { BookingStatusTag } from './BookingStatusTag';
+import { BookingStatusTag, NoShowRiskTag } from './BookingStatusTag';
 
 const SERVICE_COLOR_FALLBACK = '#a1a1aa';
-
-// Risk badge thresholds mirror the optimizer's noShowRisk scale (0–1).
-function riskLabel(risk: number): { label: string; tone: 'warn' | 'danger' } | null {
-  if (risk >= 0.5) return { label: 'High no-show risk', tone: 'danger' };
-  if (risk >= 0.3) return { label: 'Elevated risk', tone: 'warn' };
-  return null;
-}
 
 export function BookingCard({
   booking,
   onCancel,
+  onMarkNoShow,
 }: {
   booking: DashboardBooking;
   onCancel: (booking: DashboardBooking) => void;
+  onMarkNoShow?: (booking: DashboardBooking) => void;
 }) {
   const start = dayjs(booking.startsAt);
   const end = dayjs(booking.endsAt);
-  const risk = riskLabel(booking.noShowRisk);
   const isCancellable =
     booking.status === 'confirmed'
     || booking.status === 'pending'
     || booking.status === 'requested';
+  // Admin can mark no-show while still confirmed (before auto-complete at end+30m)
+  const canMarkNoShow = booking.status === 'confirmed' && !!onMarkNoShow;
 
   return (
     <div style={styles.card}>
@@ -37,11 +33,7 @@ export function BookingCard({
             {start.format('HH:mm')}–{end.format('HH:mm')}
           </span>
           <BookingStatusTag status={booking.status} />
-          {risk && (
-            <span style={risk.tone === 'danger' ? styles.riskBadgeDanger : styles.riskBadgeWarn}>
-              {risk.label}
-            </span>
-          )}
+          <NoShowRiskTag score={booking.noShowRisk} />
         </div>
         <div style={styles.service}>{booking.serviceName ?? 'Service'}</div>
         <div style={styles.meta}>
@@ -49,10 +41,28 @@ export function BookingCard({
           {booking.customerPhone && ` · ${booking.customerPhone}`}
         </div>
       </div>
-      {isCancellable && (
-        <button style={styles.cancelButton} onClick={() => onCancel(booking)} aria-label="Cancel booking">
-          Cancel
-        </button>
+      {(isCancellable || canMarkNoShow) && (
+        <div style={styles.actions}>
+          {canMarkNoShow && (
+            <button
+              type="button"
+              style={styles.noShowButton}
+              onClick={() => onMarkNoShow?.(booking)}
+            >
+              No-show
+            </button>
+          )}
+          {isCancellable && (
+            <button
+              type="button"
+              style={styles.cancelButton}
+              onClick={() => onCancel(booking)}
+              aria-label="Cancel booking"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -101,30 +111,31 @@ const styles: Record<string, React.CSSProperties> = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  riskBadgeWarn: {
-    fontSize: 11,
-    color: 'var(--warning)',
-    background: 'var(--warning-bg)',
-    padding: '2px 7px',
-    borderRadius: 999,
-  },
-  riskBadgeDanger: {
-    fontSize: 11,
-    color: 'var(--danger)',
-    background: 'var(--danger-bg)',
-    padding: '2px 7px',
-    borderRadius: 999,
-  },
-  cancelButton: {
-    flexShrink: 0,
+  actions: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
     alignSelf: 'center',
     marginRight: 12,
+    flexShrink: 0,
+  },
+  cancelButton: {
     padding: '6px 12px',
     borderRadius: 'var(--radius-sm)',
     border: '1px solid var(--border)',
     background: 'var(--surface)',
     color: 'var(--ink-muted)',
     fontSize: 12,
+    cursor: 'pointer',
+  },
+  noShowButton: {
+    padding: '6px 12px',
+    borderRadius: 'var(--radius-sm)',
+    border: '1px solid #d4d4d8',
+    background: '#f4f4f5',
+    color: '#3f3f46',
+    fontSize: 12,
+    fontWeight: 600,
     cursor: 'pointer',
   },
 };

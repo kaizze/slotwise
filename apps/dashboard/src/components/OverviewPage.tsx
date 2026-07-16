@@ -29,7 +29,9 @@ export function OverviewPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<DashboardBooking | null>(null);
+  const [noShowTarget, setNoShowTarget] = useState<DashboardBooking | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [markingNoShow, setMarkingNoShow] = useState(false);
   const [cancelNotice, setCancelNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -68,6 +70,22 @@ export function OverviewPage() {
       setCancelTarget(null);
     } finally {
       setCancelling(false);
+    }
+  }
+
+  async function confirmNoShow() {
+    if (!noShowTarget) return;
+    setMarkingNoShow(true);
+    try {
+      await bookingsApi.markNoShow(noShowTarget.ref);
+      setNoShowTarget(null);
+      setCancelNotice('Marked as no-show. Customer profile updated.');
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not mark no-show.');
+      setNoShowTarget(null);
+    } finally {
+      setMarkingNoShow(false);
     }
   }
 
@@ -140,7 +158,12 @@ export function OverviewPage() {
             ) : (
               <div style={styles.list}>
                 {overview!.timeline.map((b) => (
-                  <BookingCard key={b.id} booking={b} onCancel={setCancelTarget} />
+                  <BookingCard
+                    key={b.id}
+                    booking={b}
+                    onCancel={setCancelTarget}
+                    onMarkNoShow={setNoShowTarget}
+                  />
                 ))}
               </div>
             )}
@@ -172,6 +195,36 @@ export function OverviewPage() {
                 disabled={cancelling}
               >
                 {cancelling ? 'Cancelling…' : 'Cancel booking'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {noShowTarget && (
+        <div style={styles.modalBackdrop}>
+          <div style={styles.modal}>
+            <h3 style={styles.modalTitle}>Mark as no-show?</h3>
+            <p style={styles.modalText}>
+              {noShowTarget.customerName} · {dayjs(noShowTarget.startsAt).format('HH:mm')} ·{' '}
+              {noShowTarget.serviceName}. Updates their no-show history for future risk scoring.
+            </p>
+            <div style={styles.modalActions}>
+              <button
+                type="button"
+                style={styles.secondaryButton}
+                onClick={() => setNoShowTarget(null)}
+                disabled={markingNoShow}
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                style={styles.noShowButton}
+                onClick={confirmNoShow}
+                disabled={markingNoShow}
+              >
+                {markingNoShow ? 'Saving…' : 'Mark no-show'}
               </button>
             </div>
           </div>
@@ -378,6 +431,16 @@ const styles: Record<string, React.CSSProperties> = {
   dangerButton: {
     border: 'none',
     background: 'var(--danger)',
+    color: '#fff',
+    borderRadius: 'var(--radius-sm)',
+    padding: '8px 12px',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  noShowButton: {
+    border: 'none',
+    background: '#3f3f46',
     color: '#fff',
     borderRadius: 'var(--radius-sm)',
     padding: '8px 12px',
