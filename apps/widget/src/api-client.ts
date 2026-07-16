@@ -171,12 +171,32 @@ export class SlotWiseApiClient {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>;
     history?: unknown[];
   }): Promise<AgentChatResult> {
-    return this.request<AgentChatResult>(`/api/v1/agent/${this.businessSlug}/chat`, {
+    // Agent chat returns a flat { reply, messages, history } payload (not { data }).
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (this.accessToken) {
+      headers.Authorization = `Bearer ${this.accessToken}`;
+    }
+
+    const response = await fetch(`${this.baseUrl}/api/v1/agent/${this.businessSlug}/chat`, {
       method: 'POST',
+      headers,
       body: JSON.stringify({
         messages: input.messages,
         ...(input.history && input.history.length > 0 ? { history: input.history } : {}),
       }),
     });
+
+    const body = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new ApiError(
+        body.message ?? body.error ?? 'Something went wrong',
+        response.status,
+      );
+    }
+
+    return body as AgentChatResult;
   }
 }
