@@ -25,18 +25,25 @@ const loginSchema = z.object({
 
 // ─── Cookie helper ─────────────────────────────────────────────────────────────
 
-function setRefreshCookie(reply: FastifyReply, token: string): void {
-  reply.setCookie(REFRESH_COOKIE_NAME, token, {
+function refreshCookieOptions() {
+  return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    sameSite: 'strict' as const,
     path: '/api/v1/auth',
+  };
+}
+
+function setRefreshCookie(reply: FastifyReply, token: string): void {
+  reply.setCookie(REFRESH_COOKIE_NAME, token, {
+    ...refreshCookieOptions(),
     maxAge: REFRESH_COOKIE_MAX_AGE,
   });
 }
 
 function clearRefreshCookie(reply: FastifyReply): void {
-  reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/api/v1/auth' });
+  // Must match setCookie attributes or browsers keep the cookie.
+  reply.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions());
 }
 
 export async function authRoutes(fastify: FastifyInstance) {
