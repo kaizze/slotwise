@@ -309,6 +309,13 @@ export const bookingsApi = {
       body: JSON.stringify({ reason }),
     });
   },
+
+  async markNoShow(ref: string): Promise<void> {
+    await request(`/api/v1/bookings/${ref}/admin-no-show`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
 };
 
 // ─── Staff ──────────────────────────────────────────────────────────────────

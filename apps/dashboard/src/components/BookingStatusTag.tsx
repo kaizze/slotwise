@@ -109,7 +109,7 @@ export function BookingStatusTag({
 }
 
 export function BookingStatusLegend() {
-  const order = ['confirmed', 'pending', 'requested', 'cancelled', 'no_show'] as const;
+  const order = ['confirmed', 'pending', 'requested', 'cancelled', 'no_show', 'completed'] as const;
   return (
     <div
       style={{
@@ -126,5 +126,80 @@ export function BookingStatusLegend() {
         <BookingStatusTag key={status} status={status} size="sm" />
       ))}
     </div>
+  );
+}
+
+type RiskLevel = 'low' | 'medium' | 'high';
+
+function riskLevel(score: number): RiskLevel {
+  if (score >= 0.5) return 'high';
+  if (score >= 0.3) return 'medium';
+  return 'low';
+}
+
+const RISK_STYLES: Record<RiskLevel, { label: string; color: string; background: string; border: string }> = {
+  low: {
+    label: 'No-show risk: Low',
+    color: '#15803d',
+    background: '#f0fdf4',
+    border: '#bbf7d0',
+  },
+  medium: {
+    label: 'No-show risk: Med',
+    color: '#a16207',
+    background: '#fefce8',
+    border: '#fde68a',
+  },
+  high: {
+    label: 'No-show risk: High',
+    color: '#b91c1c',
+    background: '#fef2f2',
+    border: '#fecaca',
+  },
+};
+
+/** Predicted no-show risk from customer history + booking factors (0–1). */
+export function NoShowRiskTag({
+  score,
+  size = 'md',
+}: {
+  score: number;
+  size?: 'sm' | 'md';
+}) {
+  const level = riskLevel(score);
+  const style = RISK_STYLES[level];
+  const compact = size === 'sm';
+  const pct = Math.round(Math.min(1, Math.max(0, score)) * 100);
+
+  return (
+    <span
+      title={`noShowRisk ${pct}%`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: compact ? 4 : 6,
+        fontSize: compact ? 10 : 11,
+        fontWeight: 600,
+        lineHeight: 1,
+        color: style.color,
+        background: style.background,
+        border: `1px solid ${style.border}`,
+        padding: compact ? '2px 6px' : '3px 8px',
+        borderRadius: 999,
+        whiteSpace: 'nowrap' as const,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: compact ? 6 : 7,
+          height: compact ? 6 : 7,
+          borderRadius: 999,
+          background: style.color,
+          flexShrink: 0,
+        }}
+      />
+      {style.label}
+    </span>
   );
 }

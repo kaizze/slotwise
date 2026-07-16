@@ -156,4 +156,21 @@ export async function bookingRoutes(fastify: FastifyInstance) {
       }
     },
   });
+
+  // Admin: mark a confirmed booking as no-show (feeds customer no-show profiling)
+  fastify.post('/:ref/admin-no-show', {
+    preHandler: requireAuth,
+    handler: async (request, reply) => {
+      const { ref } = request.params as { ref: string };
+      const business = request.business!;
+
+      try {
+        const booking = await BookingService.markNoShow(business.id, ref);
+        return reply.send({ data: booking });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Mark no-show failed';
+        return reply.status(404).send({ error: message });
+      }
+    },
+  });
 }

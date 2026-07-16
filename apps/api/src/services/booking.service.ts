@@ -3,6 +3,7 @@ import { db } from '../db/client.js';
 import { rankSlots, scoreNoShowRisk, findConsolidationOpportunities } from '@slotwise/slot-optimizer';
 import { NotificationService } from './notification.service.js';
 import { SlotOfferService } from './slot-offer.service.js';
+import { CustomerService } from './customer.service.js';
 import type { Booking, BookingChannel, Slot } from '@slotwise/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -135,7 +136,7 @@ export const BookingService = {
     const conflict = await db.query(`
       SELECT id FROM bookings
       WHERE staff_id = $1
-        AND status NOT IN ('cancelled')
+        AND status NOT IN ('cancelled', 'no_show')
         AND tstzrange(starts_at, ends_at) && tstzrange($2::timestamptz, $3::timestamptz)
     `, [input.staffId, startsAt.toISOString(), endsAt.toISOString()]);
 
@@ -212,7 +213,7 @@ export const BookingService = {
     const conflict = await db.query(`
       SELECT id FROM bookings
       WHERE staff_id = $1
-        AND status NOT IN ('cancelled')
+        AND status NOT IN ('cancelled', 'no_show')
         AND id != $4
         AND tstzrange(starts_at, ends_at) && tstzrange($2::timestamptz, $3::timestamptz)
     `, [existing.staff_id, newStartsAt.toISOString(), endsAt.toISOString(), existing.id]);
@@ -234,6 +235,40 @@ export const BookingService = {
     const booking = toBooking(updatedRow);
     await NotificationService.scheduleConfirmation(booking);
     return booking;
+  },
+
+  /**
+   * Admin marks a confirmed booking as no-show. Increments the customer's
+   * no_show_count so future noShowRisk scoring reflects the history.
+   * Only confirmed bookings can be marked (before auto-complete runs).
+   */
+  async markNoShow(businessId: string, ref: string): Promise<Booking> {
+    const result = await db.query<BookingRow>(`
+      UPDATE bookings
+      SET status = 'no_show', updated_at = NOW()
+      WHERE ref = $1 AND business_id = $2 AND status = 'confirmed'
+      RETURNING *
+    `, [ref, businessId]);
+
+    const row = result.rows[0];
+    if (!row) throw new Error('Booking not found or not eligible for no-show');
+
+    await CustomerService.recordNoShow(row.customer_id);
+    return toBooking(row);
+  },
+
+  /**
+   * Auto-complete confirmed bookings whose end time was more than 30 minutes ago
+   * and that were not manually marked no-show. Safe to run on a poll loop.
+   */
+  async autoCompleteEnded(): Promise<number> {
+    const result = await db.query(`
+      UPDATE bookings
+      SET status = 'completed', updated_at = NOW()
+      WHERE status = 'confirmed'
+        AND ends_at + interval '30 minutes' < NOW()
+    `);
+    return result.rowCount ?? 0;
   },
 
   async cancel(businessId: string, ref: string, reason?: string): Promise<{ success: boolean; freedSlot: { startsAt: Date; endsAt: Date; staffId: string } }> {
