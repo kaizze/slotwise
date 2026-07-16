@@ -73,7 +73,8 @@ export function FillPage() {
         <div>
           <h1 style={styles.title}>Slot filling</h1>
           <p style={styles.subtitle}>
-            Waitlist and rebook offers after cancellations.
+            Rebook offers after cancellations. Manage the waiting list under{' '}
+            <a href="/waitlist" style={{ color: 'var(--accent)' }}>Waitlist</a>.
           </p>
         </div>
         <button style={styles.refreshButton} onClick={load} disabled={loading}>

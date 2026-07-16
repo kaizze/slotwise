@@ -125,4 +125,32 @@ export const WaitlistService = {
 
     return toWaitlistEntry(created);
   },
+
+  async remove(businessId: string, waitlistId: string): Promise<void> {
+    const result = await db.query(`
+      DELETE FROM waitlist
+      WHERE id = $1 AND business_id = $2
+    `, [waitlistId, businessId]);
+    if ((result.rowCount ?? 0) === 0) {
+      throw new Error('Waitlist entry not found');
+    }
+  },
+
+  /** Mark entry as offered/handled so they leave the active queue. */
+  async markNotified(businessId: string, waitlistId: string): Promise<void> {
+    await db.query(`
+      UPDATE waitlist
+      SET notified = TRUE
+      WHERE id = $1 AND business_id = $2
+    `, [waitlistId, businessId]);
+  },
+
+  async countActive(businessId: string): Promise<number> {
+    const row = await db.queryOneOrThrow<{ count: string }>(`
+      SELECT COUNT(*)::text AS count
+      FROM waitlist
+      WHERE business_id = $1 AND notified = FALSE
+    `, [businessId]);
+    return Number(row.count);
+  },
 };

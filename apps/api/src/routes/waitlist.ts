@@ -69,4 +69,21 @@ export async function waitlistRoutes(fastify: FastifyInstance) {
       return reply.send({ data: entries });
     },
   });
+
+  // Admin: remove someone from the waitlist
+  fastify.delete('/:id', {
+    preHandler: requireAuth,
+    handler: async (request, reply) => {
+      const business = request.business!;
+      const { id } = request.params as { id: string };
+
+      try {
+        await WaitlistService.remove(business.id, id);
+        return reply.status(204).send();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Remove failed';
+        return reply.status(404).send({ error: message });
+      }
+    },
+  });
 }
