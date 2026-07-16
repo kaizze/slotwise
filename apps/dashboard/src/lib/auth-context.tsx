@@ -9,8 +9,20 @@ interface AuthState {
   status: 'loading' | 'authenticated' | 'unauthenticated';
 }
 
+export interface SignupInput {
+  businessName: string;
+  businessSlug: string;
+  businessType: string;
+  ownerName: string;
+  ownerEmail: string;
+  ownerPassword: string;
+  timezone?: string;
+  locale?: string;
+}
+
 interface AuthContextValue extends AuthState {
   login: (email: string, password: string) => Promise<void>;
+  signup: (input: SignupInput) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -50,13 +62,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ user: result.user, business: result.business, status: 'authenticated' });
   };
 
+  const signup = async (input: SignupInput) => {
+    const result = await authApi.signup(input);
+    setState({ user: result.user, business: result.business, status: 'authenticated' });
+  };
+
   const logout = async () => {
     await authApi.logout();
     setState({ user: null, business: null, status: 'unauthenticated' });
   };
 
   return (
-    <AuthContext.Provider value={{ ...state, login, logout }}>
+    <AuthContext.Provider value={{ ...state, login, signup, logout }}>
       {children}
     </AuthContext.Provider>
   );
