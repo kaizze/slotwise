@@ -4,6 +4,7 @@ import { BookingService } from '../services/booking.service.js';
 import { CustomerService } from '../services/customer.service.js';
 import { BusinessService } from '../services/business.service.js';
 import { requireAuth } from '../middleware/auth.js';
+import { optionalCustomerAuth } from '../middleware/customer-auth.js';
 import type { Booking } from '@slotwise/types';
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
@@ -32,36 +33,59 @@ const listBookingsQuerySchema = z.object({
 
 export async function bookingRoutes(fastify: FastifyInstance) {
 
-  // Public: create a booking (widget channel)
-  fastify.post('/', async (request, reply) => {
-    const body = createBookingSchema.parse(request.body);
+  // Public: create a booking (widget channel). Guest path unchanged; optional
+  // customer Bearer token ties the booking to the signed-in account.
+  fastify.post('/', {
+    preHandler: optionalCustomerAuth,
+    handler: async (request, reply) => {
+      const body = createBookingSchema.parse(request.body);
 
-    const business = await BusinessService.getBySlug(body.businessSlug);
-    if (!business) return reply.status(404).send({ error: 'Business not found' });
+      const business = await BusinessService.getBySlug(body.businessSlug);
+      if (!business) return reply.status(404).send({ error: 'Business not found' });
 
-    const customer = await CustomerService.findOrCreate({
-      businessId: business.id,
-      name: body.customerName,
-      phone: body.customerPhone,
-      email: body.customerEmail,
-    });
+      let customerId: string;
 
-    try {
-      const booking = await BookingService.create({
-        businessId: business.id,
-        serviceId: body.serviceId,
-        staffId: body.staffId,
-        slotDatetime: body.slotDatetime,
-        customerId: customer.id,
-        notes: body.notes,
-        channel: 'widget',
-      });
+      if (request.authCustomer && request.authCustomer.businessId === business.id) {
+        const existing = await CustomerService.getById(request.authCustomer.customerId);
+        if (!existing || existing.businessId !== business.id) {
+          return reply.status(401).send({ error: 'Invalid customer session' });
+        }
+        // Signed-in account owns the booking. Phone is the account key — keep it
+        // from the customer row; sync name/email from the confirmed form.
+        await CustomerService.findOrCreate({
+          businessId: business.id,
+          name: body.customerName,
+          phone: existing.phone,
+          email: body.customerEmail ?? existing.email,
+        });
+        customerId = existing.id;
+      } else {
+        const customer = await CustomerService.findOrCreate({
+          businessId: business.id,
+          name: body.customerName,
+          phone: body.customerPhone,
+          email: body.customerEmail,
+        });
+        customerId = customer.id;
+      }
 
-      return reply.status(201).send({ data: booking });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Booking failed';
-      return reply.status(409).send({ error: message });
-    }
+      try {
+        const booking = await BookingService.create({
+          businessId: business.id,
+          serviceId: body.serviceId,
+          staffId: body.staffId,
+          slotDatetime: body.slotDatetime,
+          customerId,
+          notes: body.notes,
+          channel: 'widget',
+        });
+
+        return reply.status(201).send({ data: booking });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Booking failed';
+        return reply.status(409).send({ error: message });
+      }
+    },
   });
 
   // Public: look up a booking by reference
