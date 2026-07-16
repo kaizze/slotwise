@@ -56,6 +56,13 @@ export interface AuthTokenPayload {
   role: UserRole;
 }
 
+/** Access-token payload for customers signing in via the booking widget. */
+export interface CustomerAuthTokenPayload {
+  typ: 'customer';
+  customerId: string;
+  businessId: string;
+}
+
 // ─── Staff ───────────────────────────────────────────────────────────────────
 
 export interface Staff {

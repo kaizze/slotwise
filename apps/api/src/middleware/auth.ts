@@ -1,6 +1,6 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { BusinessService } from '../services/business.service.js';
-import type { Business, AuthTokenPayload } from '@slotwise/types';
+import type { Business, AuthTokenPayload, CustomerAuthTokenPayload } from '@slotwise/types';
 
 // Extend Fastify request type to carry the resolved business + auth payload
 declare module 'fastify' {
@@ -12,9 +12,18 @@ declare module 'fastify' {
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
-    payload: AuthTokenPayload;
-    user: AuthTokenPayload;
+    payload: AuthTokenPayload | CustomerAuthTokenPayload;
+    user: AuthTokenPayload | CustomerAuthTokenPayload;
   }
+}
+
+function isMerchantPayload(payload: unknown): payload is AuthTokenPayload {
+  if (!payload || typeof payload !== 'object') return false;
+  const p = payload as Record<string, unknown>;
+  return typeof p.userId === 'string'
+    && typeof p.businessId === 'string'
+    && typeof p.role === 'string'
+    && p.typ !== 'customer';
 }
 
 /**
@@ -56,7 +65,11 @@ export async function requireAuth(
     return reply.status(401).send({ error: 'Unauthorized' });
   }
 
-  const payload = request.user as AuthTokenPayload;
+  const payload = request.user;
+  if (!isMerchantPayload(payload)) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+
   const business = await BusinessService.getById(payload.businessId);
 
   if (!business) {

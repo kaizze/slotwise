@@ -1,8 +1,9 @@
 import { SlotWiseApiClient, ApiError } from './api-client';
-import type { ApiService, ApiSlot, ApiBusiness } from './api-client';
+import type { ApiService, ApiSlot, ApiBusiness, ApiCustomer } from './api-client';
 import widgetStyles from './styles.css?inline';
 
 type Step = 'service' | 'slot' | 'details' | 'confirm';
+type AuthMode = 'guest' | 'signin' | 'register';
 
 interface WidgetState {
   step: Step;
@@ -15,6 +16,12 @@ interface WidgetState {
   customerName: string;
   customerPhone: string;
   customerEmail: string;
+  /** Guest (default) keeps today's flow; signin/register add optional accounts. */
+  authMode: AuthMode;
+  authIdentifier: string;
+  authPassword: string;
+  signedInCustomer: ApiCustomer | null;
+  accessToken: string | null;
   loading: boolean;
   error: string | null;
   bookingRef: string | null;
@@ -49,9 +56,11 @@ export class SlotWiseWidget {
   private host: HTMLElement;
   private state: WidgetState;
   private isOpen = false;
+  private businessSlug: string;
 
   constructor(config: SlotWiseWidgetConfig) {
     const apiBaseUrl = config.apiBaseUrl ?? 'https://app.coloredkidz.gr';
+    this.businessSlug = config.businessSlug;
     this.api = new SlotWiseApiClient(apiBaseUrl, config.businessSlug);
 
     this.host = document.createElement('div');
@@ -68,6 +77,11 @@ export class SlotWiseWidget {
       this.host.style.setProperty('--sw-accent', config.accentColor);
     }
 
+    const savedToken = this.readStoredToken();
+    if (savedToken) {
+      this.api.setAccessToken(savedToken);
+    }
+
     this.state = {
       step: 'service',
       business: null,
@@ -79,6 +93,11 @@ export class SlotWiseWidget {
       customerName: '',
       customerPhone: '',
       customerEmail: '',
+      authMode: 'guest',
+      authIdentifier: '',
+      authPassword: '',
+      signedInCustomer: null,
+      accessToken: savedToken,
       loading: false,
       error: null,
       bookingRef: null,
@@ -87,6 +106,54 @@ export class SlotWiseWidget {
     };
 
     this.render();
+  }
+
+  private storageKey(): string {
+    return `slotwise_customer_token_${this.businessSlug}`;
+  }
+
+  private readStoredToken(): string | null {
+    try {
+      return localStorage.getItem(this.storageKey());
+    } catch {
+      return null;
+    }
+  }
+
+  private persistToken(token: string | null): void {
+    try {
+      if (token) localStorage.setItem(this.storageKey(), token);
+      else localStorage.removeItem(this.storageKey());
+    } catch {
+      // private browsing / blocked storage — session still works in-memory
+    }
+  }
+
+  private applyCustomerSession(customer: ApiCustomer, accessToken: string): void {
+    this.api.setAccessToken(accessToken);
+    this.persistToken(accessToken);
+    this.setState({
+      signedInCustomer: customer,
+      accessToken,
+      customerName: customer.name,
+      customerPhone: customer.phone,
+      customerEmail: customer.email ?? '',
+      authMode: 'guest',
+      authPassword: '',
+      authIdentifier: '',
+      error: null,
+    });
+  }
+
+  private clearCustomerSession(): void {
+    this.api.setAccessToken(null);
+    this.persistToken(null);
+    this.setState({
+      signedInCustomer: null,
+      accessToken: null,
+      authPassword: '',
+      error: null,
+    });
   }
 
   private todayIso(): string {
@@ -107,7 +174,37 @@ export class SlotWiseWidget {
         this.api.getBusiness(),
         this.api.getServices(),
       ]);
-      this.setState({ business, services, loading: false });
+
+      let signedInCustomer = this.state.signedInCustomer;
+      let customerName = this.state.customerName;
+      let customerPhone = this.state.customerPhone;
+      let customerEmail = this.state.customerEmail;
+      let accessToken = this.state.accessToken;
+
+      if (accessToken && !signedInCustomer) {
+        try {
+          const me = await this.api.getCustomerMe();
+          signedInCustomer = me.customer;
+          customerName = me.customer.name;
+          customerPhone = me.customer.phone;
+          customerEmail = me.customer.email ?? '';
+        } catch {
+          this.api.setAccessToken(null);
+          this.persistToken(null);
+          accessToken = null;
+        }
+      }
+
+      this.setState({
+        business,
+        services,
+        loading: false,
+        signedInCustomer,
+        customerName,
+        customerPhone,
+        customerEmail,
+        accessToken,
+      });
     } catch (err) {
       this.setState({ loading: false, error: this.errorMessage(err) });
     }
@@ -163,11 +260,50 @@ export class SlotWiseWidget {
         serviceId: selectedService.id,
         staffId: selectedSlot.staffId,
         slotDatetime: selectedSlot.startsAt,
-        customerName,
-        customerPhone,
-        customerEmail: customerEmail || undefined,
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim(),
+        customerEmail: customerEmail.trim() || undefined,
       });
       this.setState({ loading: false, step: 'confirm', bookingRef: booking.ref });
+    } catch (err) {
+      this.setState({ loading: false, error: this.errorMessage(err) });
+    }
+  }
+
+  private async submitSignIn(): Promise<void> {
+    const identifier = this.state.authIdentifier.trim();
+    const password = this.state.authPassword;
+    if (!identifier || !password) {
+      this.setState({ error: 'Email/phone and password are required.' });
+      return;
+    }
+
+    this.setState({ loading: true, error: null });
+    try {
+      const result = await this.api.loginCustomer({ identifier, password });
+      this.setState({ loading: false });
+      this.applyCustomerSession(result.customer, result.accessToken);
+    } catch (err) {
+      this.setState({ loading: false, error: this.errorMessage(err) });
+    }
+  }
+
+  private async submitRegister(): Promise<void> {
+    const name = this.state.customerName.trim();
+    const phone = this.state.customerPhone.trim();
+    const email = this.state.customerEmail.trim();
+    const password = this.state.authPassword;
+
+    if (!name || phone.length < 6 || !email || password.length < 8) {
+      this.setState({ error: 'Name, phone, email, and a password (8+ characters) are required.' });
+      return;
+    }
+
+    this.setState({ loading: true, error: null });
+    try {
+      const result = await this.api.registerCustomer({ name, phone, email, password });
+      this.setState({ loading: false });
+      this.applyCustomerSession(result.customer, result.accessToken);
     } catch (err) {
       this.setState({ loading: false, error: this.errorMessage(err) });
     }
@@ -210,14 +346,18 @@ export class SlotWiseWidget {
   }
 
   private resetForNewBooking(): void {
+    const signedIn = this.state.signedInCustomer;
     this.setState({
       step: 'service',
       selectedService: null,
       selectedSlot: null,
       slots: [],
-      customerName: '',
-      customerPhone: '',
-      customerEmail: '',
+      customerName: signedIn?.name ?? '',
+      customerPhone: signedIn?.phone ?? '',
+      customerEmail: signedIn?.email ?? '',
+      authMode: 'guest',
+      authIdentifier: '',
+      authPassword: '',
       bookingRef: null,
       showWaitlistForm: false,
       waitlistJoined: false,
@@ -395,14 +535,14 @@ export class SlotWiseWidget {
   }
 
   private renderDetailsStep(): string {
-    const { selectedService, selectedSlot } = this.state;
+    const { selectedService, selectedSlot, signedInCustomer, authMode } = this.state;
     if (!selectedService || !selectedSlot) return '';
 
     const when = new Date(selectedSlot.startsAt).toLocaleString([], {
       weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
     });
 
-    return `
+    const summary = `
       <div class="sw-summary">
         <div class="sw-summary-row">
           <span class="sw-summary-label">Service</span>
@@ -417,23 +557,91 @@ export class SlotWiseWidget {
           <span class="sw-summary-value">${escapeHtml(selectedSlot.staffName)}</span>
         </div>
       </div>
+    `;
 
+    if (signedInCustomer) {
+      return `
+        ${summary}
+        <div class="sw-auth-banner">
+          <span>Signed in as <strong>${escapeHtml(signedInCustomer.name)}</strong></span>
+          <button type="button" class="sw-link-btn" data-action="sign-out">Sign out</button>
+        </div>
+        ${this.renderGuestFields({ phoneReadonly: true, emailRequired: false })}
+        <button class="sw-button" data-action="submit-booking" ${this.canSubmit() ? '' : 'disabled'}>
+          ${this.state.loading ? '<span class="sw-spinner"></span>' : 'Confirm booking'}
+        </button>
+      `;
+    }
+
+    const tabs = `
+      <div class="sw-auth-tabs" role="tablist" aria-label="Booking as">
+        <button type="button" class="sw-auth-tab" role="tab" data-action="set-auth-mode" data-auth-mode="guest" aria-selected="${authMode === 'guest'}">Guest</button>
+        <button type="button" class="sw-auth-tab" role="tab" data-action="set-auth-mode" data-auth-mode="signin" aria-selected="${authMode === 'signin'}">Sign in</button>
+        <button type="button" class="sw-auth-tab" role="tab" data-action="set-auth-mode" data-auth-mode="register" aria-selected="${authMode === 'register'}">Create account</button>
+      </div>
+    `;
+
+    if (authMode === 'signin') {
+      return `
+        ${summary}
+        ${tabs}
+        <p class="sw-auth-hint">Sign in to reuse your details for this salon.</p>
+        <div class="sw-field">
+          <label for="sw-auth-id">Email or phone</label>
+          <input id="sw-auth-id" type="text" data-field="authIdentifier" value="${escapeHtml(this.state.authIdentifier)}" autocomplete="username" />
+        </div>
+        <div class="sw-field">
+          <label for="sw-auth-password">Password</label>
+          <input id="sw-auth-password" type="password" data-field="authPassword" value="${escapeHtml(this.state.authPassword)}" autocomplete="current-password" />
+        </div>
+        <button class="sw-button" data-action="submit-signin" ${this.canSignIn() ? '' : 'disabled'}>
+          ${this.state.loading ? '<span class="sw-spinner"></span>' : 'Sign in'}
+        </button>
+      `;
+    }
+
+    if (authMode === 'register') {
+      return `
+        ${summary}
+        ${tabs}
+        <p class="sw-auth-hint">Create an account to save your details for next time. Guest booking stays available.</p>
+        ${this.renderGuestFields({ phoneReadonly: false, emailRequired: true })}
+        <div class="sw-field">
+          <label for="sw-auth-password">Password</label>
+          <input id="sw-auth-password" type="password" data-field="authPassword" value="${escapeHtml(this.state.authPassword)}" autocomplete="new-password" />
+        </div>
+        <button class="sw-button" data-action="submit-register" ${this.canRegister() ? '' : 'disabled'}>
+          ${this.state.loading ? '<span class="sw-spinner"></span>' : 'Create account'}
+        </button>
+      `;
+    }
+
+    // Default: guest booking (unchanged fields + confirm)
+    return `
+      ${summary}
+      ${tabs}
+      <p class="sw-auth-hint">Book as a guest — no account needed.</p>
+      ${this.renderGuestFields({ phoneReadonly: false, emailRequired: false })}
+      <button class="sw-button" data-action="submit-booking" ${this.canSubmit() ? '' : 'disabled'}>
+        ${this.state.loading ? '<span class="sw-spinner"></span>' : 'Confirm booking'}
+      </button>
+    `;
+  }
+
+  private renderGuestFields(opts: { phoneReadonly: boolean; emailRequired: boolean }): string {
+    return `
       <div class="sw-field">
         <label for="sw-name">Full name</label>
         <input id="sw-name" type="text" data-field="customerName" value="${escapeHtml(this.state.customerName)}" autocomplete="name" />
       </div>
       <div class="sw-field">
         <label for="sw-phone">Phone number</label>
-        <input id="sw-phone" type="tel" data-field="customerPhone" value="${escapeHtml(this.state.customerPhone)}" autocomplete="tel" />
+        <input id="sw-phone" type="tel" data-field="customerPhone" value="${escapeHtml(this.state.customerPhone)}" autocomplete="tel" ${opts.phoneReadonly ? 'readonly' : ''} />
       </div>
       <div class="sw-field">
-        <label for="sw-email">Email (optional)</label>
+        <label for="sw-email">Email${opts.emailRequired ? '' : ' (optional)'}</label>
         <input id="sw-email" type="email" data-field="customerEmail" value="${escapeHtml(this.state.customerEmail)}" autocomplete="email" />
       </div>
-
-      <button class="sw-button" data-action="submit-booking" ${this.canSubmit() ? '' : 'disabled'}>
-        ${this.state.loading ? '<span class="sw-spinner"></span>' : 'Confirm booking'}
-      </button>
     `;
   }
 
@@ -450,6 +658,24 @@ export class SlotWiseWidget {
     return (
       this.state.customerName.trim().length > 0 &&
       this.state.customerPhone.trim().length >= 6 &&
+      !this.state.loading
+    );
+  }
+
+  private canSignIn(): boolean {
+    return (
+      this.state.authIdentifier.trim().length > 0 &&
+      this.state.authPassword.length > 0 &&
+      !this.state.loading
+    );
+  }
+
+  private canRegister(): boolean {
+    return (
+      this.state.customerName.trim().length > 0 &&
+      this.state.customerPhone.trim().length >= 6 &&
+      this.state.customerEmail.trim().includes('@') &&
+      this.state.authPassword.length >= 8 &&
       !this.state.loading
     );
   }
@@ -512,21 +738,48 @@ export class SlotWiseWidget {
           case 'submit-waitlist':
             this.submitWaitlist();
             break;
+          case 'set-auth-mode': {
+            const mode = (e.currentTarget as HTMLElement).dataset.authMode as AuthMode | undefined;
+            if (mode) {
+              this.setState({ authMode: mode, authPassword: '', error: null });
+            }
+            break;
+          }
+          case 'submit-signin':
+            this.submitSignIn();
+            break;
+          case 'submit-register':
+            this.submitRegister();
+            break;
+          case 'sign-out':
+            this.clearCustomerSession();
+            break;
         }
       });
     });
 
     container.querySelectorAll('input[data-field]').forEach((el) => {
       el.addEventListener('input', (e) => {
-        const field = (e.target as HTMLInputElement).dataset.field as keyof Pick<WidgetState, 'customerName' | 'customerPhone' | 'customerEmail'>;
+        const field = (e.target as HTMLInputElement).dataset.field as
+          | 'customerName'
+          | 'customerPhone'
+          | 'customerEmail'
+          | 'authIdentifier'
+          | 'authPassword';
         const value = (e.target as HTMLInputElement).value;
         this.state = { ...this.state, [field]: value };
         // Don't full re-render on every keystroke (would steal input focus) —
         // just update the submit button's disabled state directly.
-        const submitBtn = container.querySelector(
+        const bookingBtn = container.querySelector(
           '[data-action="submit-booking"], [data-action="submit-waitlist"]',
         ) as HTMLButtonElement | null;
-        if (submitBtn) submitBtn.disabled = !this.canSubmit();
+        if (bookingBtn) bookingBtn.disabled = !this.canSubmit();
+
+        const signInBtn = container.querySelector('[data-action="submit-signin"]') as HTMLButtonElement | null;
+        if (signInBtn) signInBtn.disabled = !this.canSignIn();
+
+        const registerBtn = container.querySelector('[data-action="submit-register"]') as HTMLButtonElement | null;
+        if (registerBtn) registerBtn.disabled = !this.canRegister();
       });
     });
   }

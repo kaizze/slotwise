@@ -47,6 +47,18 @@ export interface ApiBooking {
   status: string;
 }
 
+export interface ApiCustomer {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+}
+
+export interface CustomerAuthResult {
+  customer: ApiCustomer;
+  accessToken: string;
+}
+
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
     super(message);
@@ -55,18 +67,29 @@ export class ApiError extends Error {
 }
 
 export class SlotWiseApiClient {
+  private accessToken: string | null = null;
+
   constructor(
     private baseUrl: string,
     private businessSlug: string
   ) {}
 
+  setAccessToken(token: string | null): void {
+    this.accessToken = token;
+  }
+
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(init?.headers as Record<string, string> | undefined),
+    };
+    if (this.accessToken) {
+      headers.Authorization = `Bearer ${this.accessToken}`;
+    }
+
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        ...init?.headers,
-      },
+      headers,
     });
 
     const body = await response.json().catch(() => ({}));
@@ -110,5 +133,31 @@ export class SlotWiseApiClient {
       method: 'POST',
       body: JSON.stringify({ businessSlug: this.businessSlug, ...input }),
     });
+  }
+
+  async registerCustomer(input: {
+    name: string;
+    phone: string;
+    email: string;
+    password: string;
+  }): Promise<CustomerAuthResult> {
+    return this.request<CustomerAuthResult>(`/api/v1/customer-auth/register`, {
+      method: 'POST',
+      body: JSON.stringify({ businessSlug: this.businessSlug, ...input }),
+    });
+  }
+
+  async loginCustomer(input: {
+    identifier: string;
+    password: string;
+  }): Promise<CustomerAuthResult> {
+    return this.request<CustomerAuthResult>(`/api/v1/customer-auth/login`, {
+      method: 'POST',
+      body: JSON.stringify({ businessSlug: this.businessSlug, ...input }),
+    });
+  }
+
+  async getCustomerMe(): Promise<{ customer: ApiCustomer }> {
+    return this.request<{ customer: ApiCustomer }>(`/api/v1/customer-auth/me`);
   }
 }
