@@ -107,6 +107,33 @@ export interface DashboardSlotOffer {
   bookingRef?: string;
 }
 
+export interface AnalyticsBucket {
+  key: string;
+  label: string;
+  count: number;
+  revenue: number;
+}
+
+export interface AnalyticsReport {
+  from: string;
+  to: string;
+  timezone: string;
+  currency: string;
+  totals: {
+    reservations: number;
+    revenue: number;
+    cancelled: number;
+    noShows: number;
+    completed: number;
+    confirmed: number;
+    pending: number;
+  };
+  byHour: AnalyticsBucket[];
+  byDayOfWeek: AnalyticsBucket[];
+  byService: AnalyticsBucket[];
+  byChannel: AnalyticsBucket[];
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
 export class ApiError extends Error {
@@ -385,5 +412,12 @@ export const offersApi = {
   async list(status: 'pending' | 'accepted' | 'expired' | 'cancelled' | 'all' = 'all'): Promise<DashboardSlotOffer[]> {
     const params = new URLSearchParams({ status });
     return request<DashboardSlotOffer[]>(`/api/v1/offers?${params}`);
+  },
+};
+
+export const analyticsApi = {
+  async get(from: string, to: string): Promise<AnalyticsReport> {
+    const params = new URLSearchParams({ from, to });
+    return request<AnalyticsReport>(`/api/v1/analytics?${params}`);
   },
 };
