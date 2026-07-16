@@ -5,6 +5,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import Link from 'next/link';
 import { bookingsApi, offersApi, ApiError, type DashboardBooking, type DashboardSlotOffer } from '@/lib/api-client';
 import { BookingCard } from './BookingCard';
+import { BookingStatusLegend, BookingStatusTag, getBookingStatusStyle } from './BookingStatusTag';
 
 type CalendarView = 'day' | 'week' | 'month' | 'agenda';
 
@@ -16,7 +17,7 @@ const VIEWS: Array<{ id: CalendarView; label: string }> = [
 ];
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const SERVICE_COLOR_FALLBACK = '#a1a1aa';
+const SERVICE_COLOR_FALLBACK = '#a1a1aa'; // month density dots still use service color
 
 /** Monday-start week (Europe). */
 function startOfWeek(d: Dayjs): Dayjs {
@@ -187,6 +188,8 @@ export function BookingCalendar() {
             </button>
           )}
         </div>
+
+        <BookingStatusLegend />
       </div>
 
       {error && <div style={styles.error}>{error}</div>}
@@ -336,23 +339,28 @@ function WeekView({
               {dayBookings.length === 0 ? (
                 <div style={styles.weekEmpty}>Free</div>
               ) : (
-                dayBookings.map((b) => (
-                  <button
-                    key={b.id}
-                    type="button"
-                    style={{
-                      ...styles.weekChip,
-                      borderLeftColor: b.serviceColor ?? SERVICE_COLOR_FALLBACK,
-                    }}
-                    onClick={() => onSelectDay(key)}
-                    title={`${dayjs(b.startsAt).format('HH:mm')} ${b.customerName ?? ''} — open day`}
-                  >
-                    <span style={styles.weekChipTime}>{dayjs(b.startsAt).format('HH:mm')}</span>
-                    <span style={styles.weekChipText}>
-                      {b.customerName ?? b.serviceName ?? 'Booking'}
-                    </span>
-                  </button>
-                ))
+                dayBookings.map((b) => {
+                  const statusStyle = getBookingStatusStyle(b.status);
+                  return (
+                    <button
+                      key={b.id}
+                      type="button"
+                      style={{
+                        ...styles.weekChip,
+                        borderLeftColor: statusStyle.color,
+                        background: statusStyle.background,
+                      }}
+                      onClick={() => onSelectDay(key)}
+                      title={`${dayjs(b.startsAt).format('HH:mm')} ${b.customerName ?? ''} · ${statusStyle.label}`}
+                    >
+                      <span style={styles.weekChipTime}>{dayjs(b.startsAt).format('HH:mm')}</span>
+                      <span style={styles.weekChipText}>
+                        {b.customerName ?? b.serviceName ?? 'Booking'}
+                      </span>
+                      <BookingStatusTag status={b.status} size="sm" />
+                    </button>
+                  );
+                })
               )}
             </div>
           </div>

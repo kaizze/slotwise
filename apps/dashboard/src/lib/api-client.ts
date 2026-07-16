@@ -24,7 +24,7 @@ export interface DashboardBooking {
   ref: string;
   startsAt: string;
   endsAt: string;
-  status: 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'no_show';
+  status: 'pending' | 'requested' | 'confirmed' | 'cancelled' | 'completed' | 'no_show';
   channel: string;
   noShowRisk: number;
   serviceName?: string;

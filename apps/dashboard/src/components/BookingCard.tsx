@@ -2,6 +2,7 @@
 
 import dayjs from 'dayjs';
 import type { DashboardBooking } from '@/lib/api-client';
+import { BookingStatusTag } from './BookingStatusTag';
 
 const SERVICE_COLOR_FALLBACK = '#a1a1aa';
 
@@ -22,7 +23,10 @@ export function BookingCard({
   const start = dayjs(booking.startsAt);
   const end = dayjs(booking.endsAt);
   const risk = riskLabel(booking.noShowRisk);
-  const isCancellable = booking.status === 'confirmed' || booking.status === 'pending';
+  const isCancellable =
+    booking.status === 'confirmed'
+    || booking.status === 'pending'
+    || booking.status === 'requested';
 
   return (
     <div style={styles.card}>
@@ -32,9 +36,7 @@ export function BookingCard({
           <span style={styles.time}>
             {start.format('HH:mm')}–{end.format('HH:mm')}
           </span>
-          {booking.status !== 'confirmed' && (
-            <span style={styles.statusBadge}>{booking.status.replace('_', ' ')}</span>
-          )}
+          <BookingStatusTag status={booking.status} />
           {risk && (
             <span style={risk.tone === 'danger' ? styles.riskBadgeDanger : styles.riskBadgeWarn}>
               {risk.label}
@@ -98,14 +100,6 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-  },
-  statusBadge: {
-    fontSize: 11,
-    textTransform: 'capitalize',
-    color: 'var(--ink-muted)',
-    background: 'var(--bg)',
-    padding: '2px 7px',
-    borderRadius: 999,
   },
   riskBadgeWarn: {
     fontSize: 11,
