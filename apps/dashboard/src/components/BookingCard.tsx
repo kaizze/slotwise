@@ -21,8 +21,10 @@ export function BookingCard({
     booking.status === 'confirmed'
     || booking.status === 'pending'
     || booking.status === 'requested';
-  // Admin can mark no-show while still confirmed (before auto-complete at end+30m)
-  const canMarkNoShow = booking.status === 'confirmed' && !!onMarkNoShow;
+  // Admin can mark no-show on confirmed or completed (after auto-complete)
+  const canMarkNoShow =
+    (booking.status === 'confirmed' || booking.status === 'completed')
+    && !!onMarkNoShow;
 
   return (
     <div style={styles.card}>

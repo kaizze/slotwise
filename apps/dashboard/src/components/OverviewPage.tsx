@@ -207,7 +207,8 @@ export function OverviewPage() {
             <h3 style={styles.modalTitle}>Mark as no-show?</h3>
             <p style={styles.modalText}>
               {noShowTarget.customerName} · {dayjs(noShowTarget.startsAt).format('HH:mm')} ·{' '}
-              {noShowTarget.serviceName}. Updates their no-show history for future risk scoring.
+              {noShowTarget.serviceName}. Updates their no-show history for future risk scoring
+              (works even if already completed).
             </p>
             <div style={styles.modalActions}>
               <button

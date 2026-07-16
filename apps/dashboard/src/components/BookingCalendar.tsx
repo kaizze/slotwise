@@ -295,7 +295,8 @@ export function BookingCalendar() {
             <div style={styles.modalTitle}>Mark as no-show?</div>
             <div style={styles.modalBody}>
               {noShowTarget.customerName ?? 'This customer'} missed {noShowTarget.serviceName ?? 'their appointment'} at{' '}
-              {dayjs(noShowTarget.startsAt).format('HH:mm')}. This updates their no-show history and future risk score.
+              {dayjs(noShowTarget.startsAt).format('HH:mm')}. This updates their no-show history and future risk score
+              (works even if the booking was already auto-completed).
             </div>
             <div style={styles.modalActions}>
               <button type="button" style={styles.modalSecondaryButton} onClick={() => setNoShowTarget(null)} disabled={markingNoShow}>
