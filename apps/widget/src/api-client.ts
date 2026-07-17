@@ -170,6 +170,7 @@ export class SlotWiseApiClient {
   async chatWithAgent(input: {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>;
     history?: unknown[];
+    language?: 'el' | 'en';
   }): Promise<AgentChatResult> {
     // Agent chat returns a flat { reply, messages, history } payload (not { data }).
     const headers: Record<string, string> = {
@@ -185,6 +186,7 @@ export class SlotWiseApiClient {
       body: JSON.stringify({
         messages: input.messages,
         ...(input.history && input.history.length > 0 ? { history: input.history } : {}),
+        ...(input.language ? { language: input.language } : {}),
       }),
     });
 

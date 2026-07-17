@@ -7,6 +7,7 @@ import {
   messagesToHistory,
   normalizeHistory,
   toDisplayMessages,
+  resolveClientLanguage,
 } from '../agents/booking-agent.js';
 import type { AgentTurnMessage } from '../agents/llm-types.js';
 import { messageFromText } from '../agents/llm-types.js';
@@ -26,6 +27,8 @@ const chatBodySchema = z.object({
   // Round-trip as `history` on the next request to preserve context.
   history: z.array(z.any()).optional(),
   sessionId: z.string().optional(),
+  // Widget/channel language preference for the conversation (el | en).
+  language: z.enum(['el', 'en']).optional(),
 });
 
 export async function agentRoutes(fastify: FastifyInstance) {
@@ -60,7 +63,14 @@ export async function agentRoutes(fastify: FastifyInstance) {
           }
         : undefined;
 
-      const systemPrompt = buildSystemPrompt(business, member);
+      const latestUserText = [...body.messages].reverse().find((m) => m.role === 'user')?.content;
+      const clientLanguage = resolveClientLanguage({
+        explicit: body.language,
+        latestUserText,
+        businessLocale: business.locale,
+      });
+
+      const systemPrompt = buildSystemPrompt(business, member, clientLanguage);
 
       let agentMessages: AgentTurnMessage[];
 

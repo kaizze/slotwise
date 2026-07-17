@@ -410,6 +410,7 @@ export class SlotWiseChatWidget {
       const data = await this.api.chatWithAgent({
         messages: this.messages,
         history: this.history,
+        language: this.config.lang ?? 'el',
       });
 
       this.messages = data.messages;

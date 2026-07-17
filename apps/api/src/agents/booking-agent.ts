@@ -188,15 +188,50 @@ export const AGENT_TOOLS: ToolDefinition[] = [
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
+export type AgentClientLanguage = 'el' | 'en';
+
+/** Detect Greek vs English from customer text. Returns null when ambiguous. */
+export function detectClientLanguage(text: string): AgentClientLanguage | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  if (/[\u0370-\u03FF\u1F00-\u1FFF]/.test(trimmed)) return 'el';
+  if (/[A-Za-z]/.test(trimmed)) return 'en';
+  return null;
+}
+
+export function resolveClientLanguage(input: {
+  explicit?: string | null;
+  latestUserText?: string | null;
+  businessLocale?: string | null;
+}): AgentClientLanguage {
+  const explicit = input.explicit?.trim().toLowerCase();
+  if (explicit === 'el' || explicit === 'en') return explicit;
+
+  const detected = input.latestUserText
+    ? detectClientLanguage(input.latestUserText)
+    : null;
+  if (detected) return detected;
+
+  return input.businessLocale === 'el' ? 'el' : 'en';
+}
+
+function languageLabel(lang: AgentClientLanguage): string {
+  return lang === 'el' ? 'Greek' : 'English';
+}
+
 export function buildSystemPrompt(
   business: Pick<Business, 'name' | 'type' | 'locale' | 'settings' | 'timezone'>,
   authenticatedCustomer?: { id: string; name: string; phone: string; email?: string },
+  clientLanguage: AgentClientLanguage = business.locale === 'el' ? 'el' : 'en',
 ): string {
-  const defaultLanguage = business.locale === 'el' ? 'Greek' : 'English';
+  const sessionLanguage = languageLabel(clientLanguage);
   const now = dayjs().tz(business.timezone);
   const today = now.format('YYYY-MM-DD (dddd)');
   const tomorrow = now.add(1, 'day').format('YYYY-MM-DD (dddd)');
   const firstName = authenticatedCustomer?.name.trim().split(/\s+/)[0] ?? '';
+  const personalizationExamples = clientLanguage === 'el'
+    ? `"Γεια σου ${firstName}, πώς μπορώ να σε βοηθήσω σήμερα;" / "Το ραντεβού σου επιβεβαιώθηκε, ${firstName}, για Τετάρτη στις 11:00."`
+    : `"Hello ${firstName}, how can I help you today?" / "Your booking is confirmed, ${firstName}, for Wednesday at 11:00."`;
   const authenticatedCustomerBlock = authenticatedCustomer
     ? `
 
@@ -209,7 +244,7 @@ SIGNED-IN MEMBER (verified account for this business):
 
 PERSONALIZATION (required when signed in):
 - Address them by first name naturally: greetings, confirmations, and follow-ups.
-  Examples: "Hello ${firstName}, how can I help you today?" / "Your booking is confirmed, ${firstName}, for Wednesday at 11:00."
+  Examples: ${personalizationExamples}
 - Do NOT ask for their name or phone — you already have them.
 - Do NOT ask them to re-enter account details unless they explicitly want to book for someone else.
 - When booking / waitlist / looking up bookings / accepting offers, use their saved phone/name/email.
@@ -232,7 +267,10 @@ CURRENT DATE (${business.timezone}):
 - NEVER invent or guess calendar dates. For get_available_slots use "tomorrow"/"αύριο" or a YYYY-MM-DD from above.
 
 VOICE & LANGUAGE:
-- Reply in the same language the customer uses. If unclear, use ${defaultLanguage}.
+- SESSION LANGUAGE: ${sessionLanguage}. Start and continue this conversation in ${sessionLanguage}.
+- This language is set at the beginning from the client's widget/channel (or detected from their first message).
+- Always reply in ${sessionLanguage} unless the customer clearly switches language — then follow their new language for the rest of the chat.
+- Do not mix languages in one reply. Do not answer in English if SESSION LANGUAGE is Greek (and vice versa), even for short greetings like "hello"/"ok".
 - Tone: warm, clear, and professional — like a helpful front-desk person.
 - Keep messages short: 1-3 sentences unless listing time options.
 - Never mention internal IDs, UUIDs, or tool names.
@@ -673,7 +711,11 @@ export async function runAgentTurn(
   userMessage: string,
   business: Business
 ): Promise<{ reply: string; history: Array<{ role: 'user' | 'assistant'; content: string }> }> {
-  const systemPrompt = buildSystemPrompt(business);
+  const clientLanguage = resolveClientLanguage({
+    latestUserText: userMessage,
+    businessLocale: business.locale,
+  });
+  const systemPrompt = buildSystemPrompt(business, undefined, clientLanguage);
 
   const canonicalHistory: AgentTurnMessage[] = [
     ...history.map((m) => messageFromText(m.role, m.content)),
