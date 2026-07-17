@@ -26,6 +26,13 @@ const STRINGS = {
     placeholder: 'Type your message...',
     send: 'Send',
     greeting: 'Hi! I can help you book an appointment.\n\nFor example:\n• "I\'d like a haircut this Friday"\n• "What times are available this week?"',
+    greetingMember: (firstName: string) =>
+      `Hi ${firstName}! How can I assist you today?\n\nFor example:\n• "I'd like a haircut this Friday"\n• "What times are available this week?"`,
+    signedIn: (firstName: string) =>
+      `Welcome back, ${firstName}! I already have your details — just tell me what you'd like to book.`,
+    registered: (firstName: string) =>
+      `Nice to meet you, ${firstName}! Your account is ready — tell me what you'd like to book.`,
+    phoneRequired: 'Enter a valid phone number with at least 8 digits.',
     error: 'Something went wrong. Please try again.',
     poweredBy: 'Powered by SlotWise',
   },
@@ -33,10 +40,25 @@ const STRINGS = {
     placeholder: 'Γράψτε το μήνυμά σας...',
     send: 'Αποστολή',
     greeting: 'Γεια σας! Μπορώ να σας βοηθήσω να κλείσετε ραντεβού.\n\nΓια παράδειγμα:\n• «Θα ήθελα κούρεμα την Παρασκευή»\n• «Ποιες ώρες έχετε διαθέσιμες αυτή την εβδομάδα;»',
+    greetingMember: (firstName: string) =>
+      `Γεια σου ${firstName}! Πώς μπορώ να σε βοηθήσω σήμερα;\n\nΓια παράδειγμα:\n• «Θα ήθελα κούρεμα την Παρασκευή»\n• «Ποιες ώρες έχετε διαθέσιμες αυτή την εβδομάδα;»`,
+    signedIn: (firstName: string) =>
+      `Καλώς ήρθες, ${firstName}! Έχω ήδη τα στοιχεία σου — πες μου τι θέλεις να κλείσεις.`,
+    registered: (firstName: string) =>
+      `Χάρηκα, ${firstName}! Ο λογαριασμός σου είναι έτοιμος — πες μου τι θέλεις να κλείσεις.`,
+    phoneRequired: 'Συμπληρώστε έγκυρο τηλέφωνο με τουλάχιστον 8 ψηφία.',
     error: 'Κάτι πήγε στραβά. Παρακαλώ δοκιμάστε ξανά.',
     poweredBy: 'Powered by SlotWise',
   },
 } as const;
+
+function firstNameOf(name: string): string {
+  return name.trim().split(/\s+/)[0] || name.trim();
+}
+
+function phoneDigitCount(phone: string): number {
+  return (phone.match(/\d/g) ?? []).length;
+}
 
 function escapeHtml(str: string): string {
   const div = document.createElement('div');
@@ -101,8 +123,21 @@ export class SlotWiseChatWidget {
 
     this.root = this.host.attachShadow({ mode: 'open' });
     this.render();
-    void this.restoreCustomerSession();
-    this.appendMessage('assistant', this.strings.greeting);
+    void this.bootstrapGreeting();
+  }
+
+  private async bootstrapGreeting(): Promise<void> {
+    await this.restoreCustomerSession();
+    if (this.messages.length > 0) return;
+
+    if (this.signedInCustomer) {
+      this.appendMessage(
+        'assistant',
+        this.strings.greetingMember(firstNameOf(this.signedInCustomer.name)),
+      );
+    } else {
+      this.appendMessage('assistant', this.strings.greeting);
+    }
   }
 
   private render(): void {
@@ -230,10 +265,11 @@ export class SlotWiseChatWidget {
         ` : ''}
         ${isRegister ? `
           <div class="swc-auth-form">
-            <input class="swc-auth-input" data-field="authName" value="${escapeHtml(this.authName)}" placeholder="Full name" autocomplete="name" />
-            <input class="swc-auth-input" data-field="authPhone" value="${escapeHtml(this.authPhone)}" placeholder="Phone number" autocomplete="tel" />
-            <input class="swc-auth-input" data-field="authEmail" value="${escapeHtml(this.authEmail)}" placeholder="Email" autocomplete="email" />
-            <input class="swc-auth-input" type="password" data-field="authPassword" value="${escapeHtml(this.authPassword)}" placeholder="Password" autocomplete="new-password" />
+            <input class="swc-auth-input" data-field="authName" value="${escapeHtml(this.authName)}" placeholder="Full name *" autocomplete="name" />
+            <input class="swc-auth-input" data-field="authPhone" value="${escapeHtml(this.authPhone)}" placeholder="Phone number *" inputmode="tel" autocomplete="tel" />
+            <input class="swc-auth-input" data-field="authEmail" value="${escapeHtml(this.authEmail)}" placeholder="Email *" autocomplete="email" />
+            <input class="swc-auth-input" type="password" data-field="authPassword" value="${escapeHtml(this.authPassword)}" placeholder="Password *" autocomplete="new-password" />
+            <div class="swc-auth-copy">Phone is required so we can confirm and manage your bookings.</div>
             <button type="button" class="swc-auth-btn" data-action="submit-register" ${this.canRegister() ? '' : 'disabled'}>Create account</button>
           </div>
         ` : ''}
@@ -285,7 +321,7 @@ export class SlotWiseChatWidget {
   private canRegister(): boolean {
     return (
       this.authName.trim().length > 0 &&
-      this.authPhone.trim().length >= 6 &&
+      phoneDigitCount(this.authPhone) >= 8 &&
       this.authEmail.includes('@') &&
       this.authPassword.length >= 8
     );
@@ -323,7 +359,10 @@ export class SlotWiseChatWidget {
         password: this.authPassword,
       });
       this.applySession(result.customer, result.accessToken);
-      this.appendMessage('assistant', 'Signed in. I can now reuse your saved details in this chat.');
+      this.appendMessage(
+        'assistant',
+        this.strings.signedIn(firstNameOf(result.customer.name)),
+      );
     } catch (err) {
       this.appendMessage('assistant', this.errorMessage(err));
     } finally {
@@ -332,7 +371,10 @@ export class SlotWiseChatWidget {
   }
 
   private async submitRegister(): Promise<void> {
-    if (!this.canRegister()) return;
+    if (!this.canRegister()) {
+      this.appendMessage('assistant', this.strings.phoneRequired);
+      return;
+    }
     this.setThinking(true);
     try {
       const result = await this.api.registerCustomer({
@@ -342,7 +384,10 @@ export class SlotWiseChatWidget {
         password: this.authPassword,
       });
       this.applySession(result.customer, result.accessToken);
-      this.appendMessage('assistant', 'Your account is ready. I can now reuse your saved details in this chat.');
+      this.appendMessage(
+        'assistant',
+        this.strings.registered(firstNameOf(result.customer.name)),
+      );
     } catch (err) {
       this.appendMessage('assistant', this.errorMessage(err));
     } finally {

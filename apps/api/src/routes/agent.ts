@@ -51,16 +51,16 @@ export async function agentRoutes(fastify: FastifyInstance) {
           ? await CustomerAuthService.getById(request.authCustomer.customerId)
           : null;
 
-      const systemPrompt = buildSystemPrompt(
-        business,
-        signedInCustomer
-          ? {
-              name: signedInCustomer.name,
-              phone: signedInCustomer.phone,
-              email: signedInCustomer.email,
-            }
-          : undefined,
-      );
+      const member = signedInCustomer
+        ? {
+            id: signedInCustomer.id,
+            name: signedInCustomer.name,
+            phone: signedInCustomer.phone,
+            email: signedInCustomer.email,
+          }
+        : undefined;
+
+      const systemPrompt = buildSystemPrompt(business, member);
 
       let agentMessages: AgentTurnMessage[];
 
@@ -86,7 +86,8 @@ export async function agentRoutes(fastify: FastifyInstance) {
       const { reply: agentReply, messages: updatedMessages } = await runAgentLoop(
         agentMessages,
         systemPrompt,
-        business.id
+        business.id,
+        member,
       );
 
       return reply.send({

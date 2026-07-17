@@ -68,12 +68,13 @@ export const CustomerAuthService = {
       throw new CustomerAuthError('Business not found', 404);
     }
 
-    const normalizedPhone = input.phone.replace(/\s+/g, '');
+    const normalizedPhone = input.phone.replace(/[^\d+]/g, '');
     const normalizedEmail = input.email.trim().toLowerCase();
     const name = input.name.trim();
+    const digitCount = (normalizedPhone.match(/\d/g) ?? []).length;
 
-    if (normalizedPhone.length < 6) {
-      throw new CustomerAuthError('Phone number is too short');
+    if (digitCount < 8) {
+      throw new CustomerAuthError('Enter a valid phone number with at least 8 digits');
     }
 
     const passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);

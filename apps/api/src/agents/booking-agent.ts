@@ -190,23 +190,39 @@ export const AGENT_TOOLS: ToolDefinition[] = [
 
 export function buildSystemPrompt(
   business: Pick<Business, 'name' | 'type' | 'locale' | 'settings' | 'timezone'>,
-  authenticatedCustomer?: { name: string; phone: string; email?: string },
+  authenticatedCustomer?: { id: string; name: string; phone: string; email?: string },
 ): string {
   const defaultLanguage = business.locale === 'el' ? 'Greek' : 'English';
   const now = dayjs().tz(business.timezone);
   const today = now.format('YYYY-MM-DD (dddd)');
   const tomorrow = now.add(1, 'day').format('YYYY-MM-DD (dddd)');
+  const firstName = authenticatedCustomer?.name.trim().split(/\s+/)[0] ?? '';
   const authenticatedCustomerBlock = authenticatedCustomer
     ? `
 
-SIGNED-IN CUSTOMER:
-- Name: ${authenticatedCustomer.name}
+SIGNED-IN MEMBER (verified account for this business):
+- Customer ID: ${authenticatedCustomer.id}
+- Full name: ${authenticatedCustomer.name}
+- First name to use in conversation: ${firstName}
 - Phone: ${authenticatedCustomer.phone}
 - Email: ${authenticatedCustomer.email ?? 'not provided'}
-- These details are verified from the customer's account for this business.
-- Reuse them for booking / lookup / waitlist flows unless the customer explicitly asks to use different details.
-- If you already have the signed-in customer's phone, do not ask for it again unless needed to confirm a change.`
+
+PERSONALIZATION (required when signed in):
+- Address them by first name naturally: greetings, confirmations, and follow-ups.
+  Examples: "Hello ${firstName}, how can I help you today?" / "Your booking is confirmed, ${firstName}, for Wednesday at 11:00."
+- Do NOT ask for their name or phone — you already have them.
+- Do NOT ask them to re-enter account details unless they explicitly want to book for someone else.
+- When booking / waitlist / looking up bookings / accepting offers, use their saved phone/name/email.
+- Call find_or_create_customer with their saved name, phone, and email before create_booking.
+- Keep personalization light and natural — don't force the name into every short reply.`
     : '';
+
+  const contactStep = authenticatedCustomer
+    ? `4. The customer is already signed in as ${firstName}. Skip collecting name/phone. Use their saved details for find_or_create_customer (name/phone/email above).
+5. Confirm the appointment details with their first name, then call create_booking only after explicit confirmation.`
+    : `4. Collect name and phone before booking. Also ask for email (optional) for the confirmation: e.g. "Email for the confirmation? (optional)".
+5. Pass name, phone, and email (if given) to find_or_create_customer.
+6. Confirm all details, then call create_booking only after explicit confirmation.`;
 
   return `You are the booking assistant for ${business.name} (${business.type}).
 
@@ -233,9 +249,7 @@ BOOKING FLOW (follow in order):
        • none — truly nothing nearby; suggest another day or waitlist.
    - Always show local_time next to each option. Never list staff names alone.
    - For general browsing, present the times returned (up to 5 options). Treat local_time as the START time.
-4. Collect name and phone before booking. Also ask for email (optional) for the confirmation: e.g. "Email for the confirmation? (optional)".
-5. Pass name, phone, and email (if given) to find_or_create_customer.
-6. Confirm all details, then call create_booking only after explicit confirmation.
+${contactStep}
 
 RULES:
 - Never say a service doesn't exist without calling get_services first. If unsure, call get_services with no query to list all.
@@ -254,9 +268,12 @@ RULES:
 export async function dispatchTool(
   toolName: string,
   toolInput: Record<string, unknown>,
-  context: { businessId: string }
+  context: {
+    businessId: string;
+    authenticatedCustomer?: { id: string; name: string; phone: string; email?: string };
+  }
 ): Promise<string> {
-  const { businessId } = context;
+  const { businessId, authenticatedCustomer } = context;
 
   try {
     switch (toolName) {
@@ -411,13 +428,25 @@ export async function dispatchTool(
       }
 
       case 'find_or_create_customer': {
+        // Signed-in members keep their verified phone; never let the model rebind identity.
+        const phone = authenticatedCustomer?.phone ?? (toolInput.phone as string);
+        const name = authenticatedCustomer?.name ?? (toolInput.name as string);
+        const email = authenticatedCustomer?.email
+          ?? (toolInput.email as string | undefined);
+
         const customer = await CustomerService.findOrCreate({
           businessId,
-          phone: toolInput.phone as string,
-          name: toolInput.name as string,
-          email: toolInput.email as string | undefined,
+          phone,
+          name,
+          email,
         });
-        return JSON.stringify(customer);
+        return JSON.stringify({
+          ...customer,
+          // Hint for the model when a member is already authenticated.
+          ...(authenticatedCustomer
+            ? { signed_in: true, how_to_reply: `Use first name "${authenticatedCustomer.name.trim().split(/\s+/)[0]}" in confirmations.` }
+            : {}),
+        });
       }
 
       case 'create_booking': {
@@ -431,25 +460,35 @@ export async function dispatchTool(
           bookingServiceId = services[0].id;
         }
 
+        const customerId = authenticatedCustomer?.id ?? (toolInput.customer_id as string);
+
         const booking = await BookingService.create({
           businessId,
           serviceId: bookingServiceId,
           staffId: toolInput.staff_id as string,
           slotDatetime: toolInput.slot_datetime as string,
-          customerId: toolInput.customer_id as string,
+          customerId,
           notes: toolInput.notes as string | undefined,
           channel: 'agent',
         });
 
         const business = await BusinessService.getById(businessId);
         const tz = business?.timezone ?? 'UTC';
-        return JSON.stringify(formatBookingForAgent(booking, tz));
+        const formatted = formatBookingForAgent(booking, tz);
+        const firstName = authenticatedCustomer?.name.trim().split(/\s+/)[0];
+        return JSON.stringify({
+          ...formatted,
+          ...(firstName
+            ? { how_to_reply: `Confirm using their first name, e.g. "Your booking is confirmed, ${firstName}, for ${formatted.local_datetime}."` }
+            : {}),
+        });
       }
 
       case 'get_customer_bookings': {
         const business = await BusinessService.getById(businessId);
         const tz = business?.timezone ?? 'UTC';
-        const bookings = await BookingService.getByPhone(businessId, toolInput.phone as string);
+        const phone = authenticatedCustomer?.phone ?? (toolInput.phone as string);
+        const bookings = await BookingService.getByPhone(businessId, phone);
         return JSON.stringify({
           timezone: tz,
           bookings: bookings.map((b) => formatBookingForAgent(b, tz)),
@@ -470,7 +509,7 @@ export async function dispatchTool(
         const tz = business?.timezone ?? 'UTC';
         const offers = await SlotOfferService.getPendingForPhone(
           businessId,
-          toolInput.phone as string,
+          authenticatedCustomer?.phone ?? (toolInput.phone as string),
         );
         return JSON.stringify({
           timezone: tz,
@@ -489,9 +528,11 @@ export async function dispatchTool(
       }
 
       case 'accept_slot_offer': {
-        const phone = toolInput.phone as string;
+        const phone = authenticatedCustomer?.phone ?? (toolInput.phone as string);
         const normalizedPhone = phone.replace(/\s+/g, '');
-        const customer = await CustomerService.getByPhone(businessId, normalizedPhone);
+        const customer = authenticatedCustomer
+          ? await CustomerService.getById(authenticatedCustomer.id)
+          : await CustomerService.getByPhone(businessId, normalizedPhone);
         if (!customer) {
           return JSON.stringify({ error: 'Customer not found' });
         }
@@ -546,9 +587,9 @@ export async function dispatchTool(
         const entry = await WaitlistService.join({
           businessId,
           serviceId,
-          customerName: toolInput.name as string,
-          customerPhone: toolInput.phone as string,
-          customerEmail: toolInput.email as string | undefined,
+          customerName: authenticatedCustomer?.name ?? (toolInput.name as string),
+          customerPhone: authenticatedCustomer?.phone ?? (toolInput.phone as string),
+          customerEmail: authenticatedCustomer?.email ?? (toolInput.email as string | undefined),
           staffId: toolInput.staff_id as string | undefined,
           preferredWindowStart,
           preferredWindowEnd,
@@ -571,7 +612,8 @@ export async function dispatchTool(
 export async function runAgentLoop(
   messages: AgentTurnMessage[],
   systemPrompt: string,
-  businessId: string
+  businessId: string,
+  authenticatedCustomer?: { id: string; name: string; phone: string; email?: string },
 ): Promise<{ reply: string; messages: AgentTurnMessage[] }> {
   const provider = getAgentLlmProvider();
   const MAX_ITERATIONS = 10;
@@ -602,7 +644,7 @@ export async function runAgentLoop(
         kind: 'tool_result' as const,
         id: call.id,
         name: call.name,
-        result: await dispatchTool(call.name, call.args, { businessId }),
+        result: await dispatchTool(call.name, call.args, { businessId, authenticatedCustomer }),
       }))
     );
 
