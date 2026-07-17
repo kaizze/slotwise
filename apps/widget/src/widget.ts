@@ -230,8 +230,8 @@ export class SlotWiseWidget {
   private async submitWaitlist(): Promise<void> {
     const { selectedService, selectedDate, customerName, customerPhone, customerEmail } = this.state;
     if (!selectedService) return;
-    if (customerName.trim().length === 0 || customerPhone.trim().length < 6) {
-      this.setState({ error: 'Name and phone are required.' });
+    if (customerName.trim().length === 0 || this.phoneDigitCount(customerPhone) < 8) {
+      this.setState({ error: 'Name and a valid phone number (8+ digits) are required.' });
       return;
     }
 
@@ -294,8 +294,8 @@ export class SlotWiseWidget {
     const email = this.state.customerEmail.trim();
     const password = this.state.authPassword;
 
-    if (!name || phone.length < 6 || !email || password.length < 8) {
-      this.setState({ error: 'Name, phone, email, and a password (8+ characters) are required.' });
+    if (!name || this.phoneDigitCount(phone) < 8 || !email || password.length < 8) {
+      this.setState({ error: 'Name, a valid phone (8+ digits), email, and a password (8+ characters) are required.' });
       return;
     }
 
@@ -631,15 +631,15 @@ export class SlotWiseWidget {
   private renderGuestFields(opts: { phoneReadonly: boolean; emailRequired: boolean }): string {
     return `
       <div class="sw-field">
-        <label for="sw-name">Full name</label>
+        <label for="sw-name">Full name *</label>
         <input id="sw-name" type="text" data-field="customerName" value="${escapeHtml(this.state.customerName)}" autocomplete="name" />
       </div>
       <div class="sw-field">
-        <label for="sw-phone">Phone number</label>
-        <input id="sw-phone" type="tel" data-field="customerPhone" value="${escapeHtml(this.state.customerPhone)}" autocomplete="tel" ${opts.phoneReadonly ? 'readonly' : ''} />
+        <label for="sw-phone">Phone number *</label>
+        <input id="sw-phone" type="tel" data-field="customerPhone" value="${escapeHtml(this.state.customerPhone)}" inputmode="tel" autocomplete="tel" ${opts.phoneReadonly ? 'readonly' : ''} />
       </div>
       <div class="sw-field">
-        <label for="sw-email">Email${opts.emailRequired ? '' : ' (optional)'}</label>
+        <label for="sw-email">Email${opts.emailRequired ? ' *' : ' (optional)'}</label>
         <input id="sw-email" type="email" data-field="customerEmail" value="${escapeHtml(this.state.customerEmail)}" autocomplete="email" />
       </div>
     `;
@@ -654,10 +654,14 @@ export class SlotWiseWidget {
     `;
   }
 
+  private phoneDigitCount(phone: string): number {
+    return (phone.match(/\d/g) ?? []).length;
+  }
+
   private canSubmit(): boolean {
     return (
       this.state.customerName.trim().length > 0 &&
-      this.state.customerPhone.trim().length >= 6 &&
+      this.phoneDigitCount(this.state.customerPhone) >= 8 &&
       !this.state.loading
     );
   }
@@ -673,7 +677,7 @@ export class SlotWiseWidget {
   private canRegister(): boolean {
     return (
       this.state.customerName.trim().length > 0 &&
-      this.state.customerPhone.trim().length >= 6 &&
+      this.phoneDigitCount(this.state.customerPhone) >= 8 &&
       this.state.customerEmail.trim().includes('@') &&
       this.state.authPassword.length >= 8 &&
       !this.state.loading

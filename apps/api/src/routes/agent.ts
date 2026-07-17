@@ -7,6 +7,7 @@ import {
   messagesToHistory,
   normalizeHistory,
   toDisplayMessages,
+  resolveClientLanguage,
 } from '../agents/booking-agent.js';
 import type { AgentTurnMessage } from '../agents/llm-types.js';
 import { messageFromText } from '../agents/llm-types.js';
@@ -26,6 +27,8 @@ const chatBodySchema = z.object({
   // Round-trip as `history` on the next request to preserve context.
   history: z.array(z.any()).optional(),
   sessionId: z.string().optional(),
+  // Widget/channel language preference for the conversation (el | en).
+  language: z.enum(['el', 'en']).optional(),
 });
 
 export async function agentRoutes(fastify: FastifyInstance) {
@@ -51,16 +54,23 @@ export async function agentRoutes(fastify: FastifyInstance) {
           ? await CustomerAuthService.getById(request.authCustomer.customerId)
           : null;
 
-      const systemPrompt = buildSystemPrompt(
-        business,
-        signedInCustomer
-          ? {
-              name: signedInCustomer.name,
-              phone: signedInCustomer.phone,
-              email: signedInCustomer.email,
-            }
-          : undefined,
-      );
+      const member = signedInCustomer
+        ? {
+            id: signedInCustomer.id,
+            name: signedInCustomer.name,
+            phone: signedInCustomer.phone,
+            email: signedInCustomer.email,
+          }
+        : undefined;
+
+      const latestUserText = [...body.messages].reverse().find((m) => m.role === 'user')?.content;
+      const clientLanguage = resolveClientLanguage({
+        explicit: body.language,
+        latestUserText,
+        businessLocale: business.locale,
+      });
+
+      const systemPrompt = buildSystemPrompt(business, member, clientLanguage);
 
       let agentMessages: AgentTurnMessage[];
 
@@ -86,7 +96,8 @@ export async function agentRoutes(fastify: FastifyInstance) {
       const { reply: agentReply, messages: updatedMessages } = await runAgentLoop(
         agentMessages,
         systemPrompt,
-        business.id
+        business.id,
+        member,
       );
 
       return reply.send({

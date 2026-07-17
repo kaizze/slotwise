@@ -6,7 +6,12 @@ import { requireCustomerAuth } from '../middleware/customer-auth.js';
 const registerSchema = z.object({
   businessSlug: z.string().min(1),
   name: z.string().min(1),
-  phone: z.string().min(6),
+  phone: z
+    .string()
+    .min(1, 'Phone number is required')
+    .refine((value) => (value.match(/\d/g) ?? []).length >= 8, {
+      message: 'Enter a valid phone number with at least 8 digits',
+    }),
   email: z.string().email(),
   password: z.string().min(8, 'Password must be at least 8 characters'),
 });
