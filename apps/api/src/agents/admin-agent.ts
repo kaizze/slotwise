@@ -69,7 +69,7 @@ export const ADMIN_TOOLS: ToolDefinition[] = [
   {
     name: 'list_free_slots',
     description:
-      'List the actual free clock times for a date (and optional staff/service). REQUIRED when the owner asks "what times / τι ώρες". Never invent times — only report local_times from this tool.',
+      'REQUIRED for free/available clock times (τι ώρες κενές, ελεύθερα, available hours). Returns local_times as exact HH:mm. Do NOT use list_bookings for this — bookings are occupied times, not free ones. Never invent times.',
     parameters: {
       type: 'object',
       required: ['date'],
@@ -114,7 +114,8 @@ export const ADMIN_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'list_bookings',
-    description: 'List bookings for a date or range (refs, times, service, staff, customer).',
+    description:
+      'List OCCUPIED bookings only (confirmed/pending/etc). Never use this to answer free/available/κενές times — use list_free_slots instead.',
     parameters: {
       type: 'object',
       required: ['date'],
@@ -193,9 +194,12 @@ ROLE:
 
 FREE SLOTS RULES:
 - For "how many free slots…", call count_available_slots with date="tomorrow" or date="monday" (natural language).
-- For "what times / τι ώρες / free hours", you MUST call list_free_slots (with staff_name when a person is named).
-- NEVER invent clock times (e.g. 07:00, 16:30). Only quote local_times / free_local_times returned by tools.
-- If free_local_times is empty, say they have no free slots — do not guess from the booking list.
+- For free/available times ("τι ώρες κενές", "ελεύθερα", "available hours", or when the owner challenges a free-slot count), you MUST call list_free_slots (with staff_name when a person is named).
+- NEVER call list_bookings to answer free/κενές questions — that tool only returns occupied appointments.
+- NEVER invent clock times (e.g. 07:00, 08:00, 08:30, 16:30). Only quote local_times / free_local_times from tools, verbatim.
+- Do not invent "before first booking" or "after last booking" ranges. If the tool says 17:00 and 17:30, say exactly that.
+- Free times can be after the last calendar booking when staff working_hours end later (e.g. bookings until 17:00, hours until 18:00). That is normal — quote the tool times and mention working_hours_for_day if present.
+- If local_times / free_local_times is empty, say they have no free slots — do not guess.
 - Never invent a YYYY-MM-DD yourself.
 - Use total_free_slots from the tool as the headline number. That is real capacity for the reference service.
 - Do NOT add by_service counts together — the same staff time appears under multiple services.
@@ -218,8 +222,9 @@ WRITE SAFETY:
 EXAMPLES:
 - "How many free slots tomorrow?" → count_available_slots date=tomorrow
 - "How many free slots on monday and by who?" → count_available_slots date=monday (then report by_staff + free_local_times)
-- "ελεύθερα τι έχει / τι ώρες ελεύθερη η Ελένη;" → list_free_slots date=monday staff_name=Eleni
-- "τι ώρες έχει κλεισμένες η Ελένη;" → list_bookings date=monday (booked times, not free)
+- "τι ώρες κενές έχει η Ελένη;" / "ελεύθερα τι έχει" → list_free_slots date=monday staff_name=Eleni
+- "παραπάνω μου είπες ότι έχει 2 κενά" → list_free_slots again; quote local_times only
+- "τι ώρες έχει κλεισμένες η Ελένη;" → list_bookings date=monday (occupied only)
 - "Who hasn't visited in 3 months?" → get_inactive_customers days=90
 - "Show my busiest service." → get_analytics days=30, then highlight top byService
 - "Move all Friday bookings to Maria." → get_staff + preview_reassign_bookings, summarize, wait for confirmation, then confirm_reassign_bookings`;
@@ -381,6 +386,38 @@ function formatSlotsByStaff(
   return [...byStaffMap.values()].sort((a, b) => b.free_slots - a.free_slots);
 }
 
+async function workingHoursForDay(
+  businessId: string,
+  date: string,
+  tz: string,
+  staffId?: string,
+) {
+  const dayOfWeek = dayjs.tz(date, tz).day();
+  const staff = await StaffService.list(businessId);
+  const rows = staff
+    .filter((s) => (staffId ? s.id === staffId : true) && s.isActive)
+    .map((s) => {
+      const wh = s.workingHours.find((h) => h.dayOfWeek === dayOfWeek);
+      if (!wh) {
+        return {
+          staff_id: s.id,
+          staff_name: s.name,
+          works_this_day: false as const,
+        };
+      }
+      return {
+        staff_id: s.id,
+        staff_name: s.name,
+        works_this_day: true as const,
+        start_time: wh.startTime,
+        end_time: wh.endTime,
+        break_start: wh.breakStart ?? null,
+        break_end: wh.breakEnd ?? null,
+      };
+    });
+  return rows;
+}
+
 // ─── Tool dispatcher ──────────────────────────────────────────────────────────
 
 export async function dispatchAdminTool(
@@ -447,6 +484,8 @@ export async function dispatchAdminTool(
         });
 
         const byStaff = formatSlotsByStaff(referenceSlots, tz);
+        const localTimes = byStaff.flatMap((row) => row.free_local_times);
+        const workingHours = await workingHoursForDay(businessId, date, tz, staffId);
 
         const byService: Array<{
           service_id: string;
@@ -497,10 +536,12 @@ export async function dispatchAdminTool(
             duration_minutes: referenceService.durationMinutes,
           },
           total_free_slots: referenceSlots.length,
+          local_times: localTimes,
           by_staff: byStaff,
+          working_hours_for_day: workingHours,
           by_service: byService,
           how_to_reply:
-            'Report total_free_slots and local_date. Use by_staff (+ free_local_times) when asked who/when is free. Never invent HH:mm. Never sum by_service into a new total.',
+            'Report total_free_slots and local_date. Quote free times ONLY from local_times / by_staff.free_local_times. Never invent HH:mm. Never sum by_service.',
         });
       }
 
@@ -530,6 +571,7 @@ export async function dispatchAdminTool(
 
         const byStaff = formatSlotsByStaff(slots, tz);
         const localTimes = byStaff.flatMap((row) => row.free_local_times);
+        const workingHours = await workingHoursForDay(businessId, date, tz, staffId);
 
         return JSON.stringify({
           date_requested: toolInput.date,
@@ -547,8 +589,9 @@ export async function dispatchAdminTool(
           total_free_slots: slots.length,
           local_times: localTimes,
           by_staff: byStaff,
+          working_hours_for_day: workingHours,
           how_to_reply:
-            'ONLY quote exact HH:mm values from local_times / free_local_times. Do not invent ranges (e.g. 07:00-09:00) or times not listed. If local_times is empty, say there are no free slots.',
+            'ONLY quote exact HH:mm from local_times. If times are after the last booking, explain using working_hours_for_day end_time. Never invent morning times. If local_times is empty, say none free.',
         });
       }
 
