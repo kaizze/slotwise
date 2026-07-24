@@ -48,7 +48,7 @@ export const ADMIN_TOOLS: ToolDefinition[] = [
   {
     name: 'count_available_slots',
     description:
-      'Count real free capacity for a date. Pass natural language only (tomorrow / monday / αύριο) — never invent YYYY-MM-DD. Returns total openings for a reference service, plus per-staff and per-service breakdowns. Do NOT add per-service counts together (same staff time is shared).',
+      'Count real free capacity for a date. Pass natural language only (tomorrow / monday / αύριο) — never invent YYYY-MM-DD. Returns total openings for a reference service, plus per-staff counts AND free_local_times. Do NOT add per-service counts together.',
     parameters: {
       type: 'object',
       required: ['date'],
@@ -63,6 +63,25 @@ export const ADMIN_TOOLS: ToolDefinition[] = [
         },
         staff_id: { type: 'string', description: 'Optional staff UUID filter' },
         staff_name: { type: 'string', description: 'Optional staff name filter, e.g. "Maria"' },
+      },
+    },
+  },
+  {
+    name: 'list_free_slots',
+    description:
+      'List the actual free clock times for a date (and optional staff/service). REQUIRED when the owner asks "what times / τι ώρες". Never invent times — only report local_times from this tool.',
+    parameters: {
+      type: 'object',
+      required: ['date'],
+      properties: {
+        date: {
+          type: 'string',
+          description: 'Natural language: "tomorrow", "monday", "Δευτέρα", etc.',
+        },
+        staff_name: { type: 'string', description: 'Optional staff name, e.g. "Eleni"' },
+        staff_id: { type: 'string', description: 'Optional staff UUID' },
+        service_id: { type: 'string', description: 'Optional service UUID' },
+        service_name: { type: 'string', description: 'Optional service name filter, e.g. "Blow Dry"' },
       },
     },
   },
@@ -104,7 +123,8 @@ export const ADMIN_TOOLS: ToolDefinition[] = [
           type: 'string',
           description: 'Day to list, natural language or YYYY-MM-DD. For a single day.',
         },
-        staff_id: { type: 'string', description: 'Optional staff filter' },
+        staff_id: { type: 'string', description: 'Optional staff UUID filter' },
+        staff_name: { type: 'string', description: 'Optional staff name filter, e.g. "Eleni"' },
       },
     },
   },
@@ -173,13 +193,17 @@ ROLE:
 
 FREE SLOTS RULES:
 - For "how many free slots…", call count_available_slots with date="tomorrow" or date="monday" (natural language).
+- For "what times / τι ώρες / free hours", you MUST call list_free_slots (with staff_name when a person is named).
+- NEVER invent clock times (e.g. 07:00, 16:30). Only quote local_times / free_local_times returned by tools.
+- If free_local_times is empty, say they have no free slots — do not guess from the booking list.
 - Never invent a YYYY-MM-DD yourself.
 - Use total_free_slots from the tool as the headline number. That is real capacity for the reference service.
 - Do NOT add by_service counts together — the same staff time appears under multiple services.
-- When asked "by who", use by_staff from the tool.
+- When asked "by who", use by_staff from the tool (include their free_local_times).
 
 CAPABILITIES:
-- Free slot counts for a day (with per-staff breakdown)
+- Free slot counts for a day (with per-staff breakdown and real times)
+- Exact free times via list_free_slots
 - Inactive / lapsed customers
 - Analytics (busiest service, revenue, no-shows)
 - Booking lists for a day
@@ -193,7 +217,9 @@ WRITE SAFETY:
 
 EXAMPLES:
 - "How many free slots tomorrow?" → count_available_slots date=tomorrow
-- "How many free slots on monday and by who?" → count_available_slots date=monday (then report by_staff)
+- "How many free slots on monday and by who?" → count_available_slots date=monday (then report by_staff + free_local_times)
+- "ελεύθερα τι έχει / τι ώρες ελεύθερη η Ελένη;" → list_free_slots date=monday staff_name=Eleni
+- "τι ώρες έχει κλεισμένες η Ελένη;" → list_bookings date=monday (booked times, not free)
 - "Who hasn't visited in 3 months?" → get_inactive_customers days=90
 - "Show my busiest service." → get_analytics days=30, then highlight top byService
 - "Move all Friday bookings to Maria." → get_staff + preview_reassign_bookings, summarize, wait for confirmation, then confirm_reassign_bookings`;
@@ -295,6 +321,66 @@ function nextWeekdayDate(input: string, tz: string): string {
   return resolveAdminDate(input, tz);
 }
 
+async function resolveServiceForAdmin(
+  businessId: string,
+  toolInput: Record<string, unknown>,
+) {
+  const services = await ServiceService.list(businessId);
+  if (services.length === 0) return { services, referenceService: null as null };
+
+  if (toolInput.service_id) {
+    const match = services.find((s) => s.id === toolInput.service_id);
+    if (match) return { services, referenceService: match };
+  }
+
+  if (toolInput.service_name) {
+    const q = transliterateGreek(String(toolInput.service_name));
+    const match = services.find((s) => transliterateGreek(s.name).includes(q));
+    if (match) return { services, referenceService: match };
+  }
+
+  const shortest = [...services].sort((a, b) => a.durationMinutes - b.durationMinutes)[0]!;
+  return { services, referenceService: shortest };
+}
+
+async function resolveStaffIdForAdmin(
+  businessId: string,
+  toolInput: Record<string, unknown>,
+): Promise<{ staffId?: string; error?: string }> {
+  if (toolInput.staff_id) return { staffId: String(toolInput.staff_id) };
+  if (!toolInput.staff_name) return {};
+  const named = await resolveStaffByName(businessId, String(toolInput.staff_name));
+  if (!named) return { error: `No staff found matching "${toolInput.staff_name}"` };
+  return { staffId: named.id };
+}
+
+function formatSlotsByStaff(
+  slots: Array<{ startsAt: Date; staffId: string; staffName: string }>,
+  tz: string,
+) {
+  const byStaffMap = new Map<string, {
+    staff_id: string;
+    staff_name: string;
+    free_slots: number;
+    free_local_times: string[];
+  }>();
+
+  const ordered = [...slots].sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+  for (const slot of ordered) {
+    const current = byStaffMap.get(slot.staffId) ?? {
+      staff_id: slot.staffId,
+      staff_name: slot.staffName,
+      free_slots: 0,
+      free_local_times: [],
+    };
+    current.free_slots += 1;
+    current.free_local_times.push(dayjs(slot.startsAt).tz(tz).format('HH:mm'));
+    byStaffMap.set(slot.staffId, current);
+  }
+
+  return [...byStaffMap.values()].sort((a, b) => b.free_slots - a.free_slots);
+}
+
 // ─── Tool dispatcher ──────────────────────────────────────────────────────────
 
 export async function dispatchAdminTool(
@@ -342,26 +428,14 @@ export async function dispatchAdminTool(
         const now = dayjs().tz(tz);
         const date = resolveAdminDate(String(toolInput.date ?? 'tomorrow'), tz);
 
-        let staffId = toolInput.staff_id as string | undefined;
-        if (!staffId && toolInput.staff_name) {
-          const named = await resolveStaffByName(businessId, String(toolInput.staff_name));
-          if (!named) {
-            return JSON.stringify({ error: `No staff found matching "${toolInput.staff_name}"` });
-          }
-          staffId = named.id;
-        }
+        const staffResolved = await resolveStaffIdForAdmin(businessId, toolInput);
+        if (staffResolved.error) return JSON.stringify({ error: staffResolved.error });
+        const staffId = staffResolved.staffId;
 
-        const services = await ServiceService.list(businessId);
-        if (services.length === 0) {
+        const { services, referenceService } = await resolveServiceForAdmin(businessId, toolInput);
+        if (!referenceService) {
           return JSON.stringify({ error: 'No matching services', date });
         }
-
-        // Capacity unit = requested service, else shortest active service.
-        // Summing every service double-counts the same staff time (e.g. 36+36 haircut/blowdry).
-        const sortedByDuration = [...services].sort((a, b) => a.durationMinutes - b.durationMinutes);
-        const referenceService = toolInput.service_id
-          ? services.find((s) => s.id === toolInput.service_id) ?? sortedByDuration[0]!
-          : sortedByDuration[0]!;
 
         const referenceSlots = await SlotService.getAvailableSlots({
           businessId,
@@ -372,16 +446,7 @@ export async function dispatchAdminTool(
           limit: undefined,
         });
 
-        const byStaffMap = new Map<string, { staff_id: string; staff_name: string; free_slots: number }>();
-        for (const slot of referenceSlots) {
-          const current = byStaffMap.get(slot.staffId) ?? {
-            staff_id: slot.staffId,
-            staff_name: slot.staffName,
-            free_slots: 0,
-          };
-          current.free_slots += 1;
-          byStaffMap.set(slot.staffId, current);
-        }
+        const byStaff = formatSlotsByStaff(referenceSlots, tz);
 
         const byService: Array<{
           service_id: string;
@@ -432,10 +497,58 @@ export async function dispatchAdminTool(
             duration_minutes: referenceService.durationMinutes,
           },
           total_free_slots: referenceSlots.length,
-          by_staff: [...byStaffMap.values()].sort((a, b) => b.free_slots - a.free_slots),
+          by_staff: byStaff,
           by_service: byService,
           how_to_reply:
-            'Report total_free_slots and local_date. Use by_staff when asked who is free. Never sum by_service into a new total.',
+            'Report total_free_slots and local_date. Use by_staff (+ free_local_times) when asked who/when is free. Never invent HH:mm. Never sum by_service into a new total.',
+        });
+      }
+
+      case 'list_free_slots': {
+        const business = await BusinessService.getById(businessId);
+        const tz = business?.timezone ?? 'UTC';
+        const now = dayjs().tz(tz);
+        const date = resolveAdminDate(String(toolInput.date ?? 'tomorrow'), tz);
+
+        const staffResolved = await resolveStaffIdForAdmin(businessId, toolInput);
+        if (staffResolved.error) return JSON.stringify({ error: staffResolved.error });
+        const staffId = staffResolved.staffId;
+
+        const { referenceService } = await resolveServiceForAdmin(businessId, toolInput);
+        if (!referenceService) {
+          return JSON.stringify({ error: 'No matching services', date });
+        }
+
+        const slots = await SlotService.getAvailableSlots({
+          businessId,
+          serviceId: referenceService.id,
+          date,
+          staffId,
+          presentation: 'customer',
+          limit: undefined,
+        });
+
+        const byStaff = formatSlotsByStaff(slots, tz);
+        const localTimes = byStaff.flatMap((row) => row.free_local_times);
+
+        return JSON.stringify({
+          date_requested: toolInput.date,
+          date_searched: date,
+          local_date: dayjs.tz(date, tz).format('dddd D MMMM YYYY'),
+          today: now.format('YYYY-MM-DD'),
+          tomorrow: now.add(1, 'day').format('YYYY-MM-DD'),
+          timezone: tz,
+          service: {
+            id: referenceService.id,
+            name: referenceService.name,
+            duration_minutes: referenceService.durationMinutes,
+          },
+          staff_filter: staffId ?? null,
+          total_free_slots: slots.length,
+          local_times: localTimes,
+          by_staff: byStaff,
+          how_to_reply:
+            'ONLY quote exact HH:mm values from local_times / free_local_times. Do not invent ranges (e.g. 07:00-09:00) or times not listed. If local_times is empty, say there are no free slots.',
         });
       }
 
@@ -501,8 +614,10 @@ export async function dispatchAdminTool(
           dayStart.toDate(),
           dayEnd.toDate(),
         ) as AdminBooking[];
-        if (toolInput.staff_id) {
-          bookings = bookings.filter((b) => b.staffId === toolInput.staff_id);
+        const staffResolved = await resolveStaffIdForAdmin(businessId, toolInput);
+        if (staffResolved.error) return JSON.stringify({ error: staffResolved.error });
+        if (staffResolved.staffId) {
+          bookings = bookings.filter((b) => b.staffId === staffResolved.staffId);
         }
         return JSON.stringify({
           date,
