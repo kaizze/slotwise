@@ -294,13 +294,22 @@ function resolveAdminDate(input: string, tz: string): string {
   ];
 
   for (const day of weekdays) {
-    if (day.keys.some((key) => lower === key || lower.includes(` ${key}`) || lower.startsWith(`${key} `) || lower.includes(key))) {
-      // Upcoming matching weekday; if today matches, keep today.
-      let cursor = now.startOf('day');
-      for (let i = 0; i < 7; i++) {
-        if (cursor.day() === day.dow) return cursor.format('YYYY-MM-DD');
-        cursor = cursor.add(1, 'day');
+    // Prefer long names; short keys (mon/sun) must be whole tokens so
+    // "this month" does not resolve as Monday.
+    const keys = [...day.keys].sort((a, b) => b.length - a.length);
+    const matched = keys.some((key) => {
+      if (lower === key) return true;
+      if (key.length <= 3) {
+        return new RegExp(`(?:^|\\s)${key}(?:\\s|$)`).test(lower);
       }
+      return lower.includes(key);
+    });
+    if (!matched) continue;
+    // Upcoming matching weekday; if today matches, keep today.
+    let cursor = now.startOf('day');
+    for (let i = 0; i < 7; i++) {
+      if (cursor.day() === day.dow) return cursor.format('YYYY-MM-DD');
+      cursor = cursor.add(1, 'day');
     }
   }
 
@@ -469,59 +478,23 @@ export async function dispatchAdminTool(
         if (staffResolved.error) return JSON.stringify({ error: staffResolved.error });
         const staffId = staffResolved.staffId;
 
-        const { services, referenceService } = await resolveServiceForAdmin(businessId, toolInput);
+        const { referenceService } = await resolveServiceForAdmin(businessId, toolInput);
         if (!referenceService) {
           return JSON.stringify({ error: 'No matching services', date });
         }
 
+        // Admin capacity must use the full ranked list — never the customer
+        // morning-biased presentation path.
         const referenceSlots = await SlotService.getAvailableSlots({
           businessId,
           serviceId: referenceService.id,
           date,
           staffId,
-          presentation: 'customer',
-          limit: undefined,
         });
 
         const byStaff = formatSlotsByStaff(referenceSlots, tz);
         const localTimes = byStaff.flatMap((row) => row.free_local_times);
         const workingHours = await workingHoursForDay(businessId, date, tz, staffId);
-
-        const byService: Array<{
-          service_id: string;
-          service_name: string;
-          duration_minutes: number;
-          free_slots: number;
-          note?: string;
-        }> = [];
-
-        for (const service of services) {
-          if (service.id === referenceService.id) {
-            byService.push({
-              service_id: service.id,
-              service_name: service.name,
-              duration_minutes: service.durationMinutes,
-              free_slots: referenceSlots.length,
-              note: 'reference_capacity_unit',
-            });
-            continue;
-          }
-          const slots = await SlotService.getAvailableSlots({
-            businessId,
-            serviceId: service.id,
-            date,
-            staffId,
-            presentation: 'customer',
-            limit: undefined,
-          });
-          byService.push({
-            service_id: service.id,
-            service_name: service.name,
-            duration_minutes: service.durationMinutes,
-            free_slots: slots.length,
-            note: 'do_not_add_to_total',
-          });
-        }
 
         return JSON.stringify({
           date_requested: toolInput.date,
@@ -536,12 +509,13 @@ export async function dispatchAdminTool(
             duration_minutes: referenceService.durationMinutes,
           },
           total_free_slots: referenceSlots.length,
-          local_times: localTimes,
+          // Only expose a flat time list when a single staff filter is set —
+          // otherwise the model can attribute another person's slot to Eleni.
+          ...(staffId ? { local_times: localTimes } : {}),
           by_staff: byStaff,
           working_hours_for_day: workingHours,
-          by_service: byService,
           how_to_reply:
-            'Report total_free_slots and local_date. Quote free times ONLY from local_times / by_staff.free_local_times. Never invent HH:mm. Never sum by_service.',
+            'Report total_free_slots and local_date. Quote free times ONLY from by_staff.free_local_times (or local_times when staff-filtered). Never invent HH:mm.',
         });
       }
 
@@ -565,8 +539,6 @@ export async function dispatchAdminTool(
           serviceId: referenceService.id,
           date,
           staffId,
-          presentation: 'customer',
-          limit: undefined,
         });
 
         const byStaff = formatSlotsByStaff(slots, tz);
@@ -587,11 +559,11 @@ export async function dispatchAdminTool(
           },
           staff_filter: staffId ?? null,
           total_free_slots: slots.length,
-          local_times: localTimes,
+          ...(staffId ? { local_times: localTimes } : {}),
           by_staff: byStaff,
           working_hours_for_day: workingHours,
           how_to_reply:
-            'ONLY quote exact HH:mm from local_times. If times are after the last booking, explain using working_hours_for_day end_time. Never invent morning times. If local_times is empty, say none free.',
+            'ONLY quote exact HH:mm from local_times / by_staff.free_local_times. If times are after the last booking, explain using working_hours_for_day end_time. Never invent morning times. If empty, say none free.',
         });
       }
 
@@ -809,6 +781,119 @@ export async function dispatchAdminTool(
   }
 }
 
+// ─── Reply enforcement ────────────────────────────────────────────────────────
+
+type FreeSlotToolPayload = {
+  tool: 'count_available_slots' | 'list_free_slots';
+  local_date?: string;
+  total_free_slots?: number;
+  local_times?: string[];
+  by_staff?: Array<{
+    staff_name: string;
+    free_slots: number;
+    free_local_times: string[];
+  }>;
+  working_hours_for_day?: Array<{
+    staff_name: string;
+    works_this_day: boolean;
+    start_time?: string;
+    end_time?: string;
+  }>;
+  reference_service?: { name: string };
+  service?: { name: string };
+};
+
+function normalizeClockToken(hour: string, minute: string): string {
+  return `${hour.padStart(2, '0')}:${minute}`;
+}
+
+function extractClockTokens(text: string): string[] {
+  const out: string[] = [];
+  for (const match of text.matchAll(/\b(\d{1,2}):(\d{2})\b/g)) {
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+      out.push(normalizeClockToken(String(hour), match[2]!));
+    }
+  }
+  return out;
+}
+
+function allowedFreeTimes(payload: FreeSlotToolPayload): Set<string> {
+  const allow = new Set<string>();
+  for (const t of payload.local_times ?? []) allow.add(t);
+  for (const row of payload.by_staff ?? []) {
+    for (const t of row.free_local_times ?? []) allow.add(t);
+  }
+  return allow;
+}
+
+function formatAuthoritativeFreeSlotReply(payload: FreeSlotToolPayload): string {
+  const dateLabel = payload.local_date ?? 'that day';
+  const serviceName = payload.service?.name ?? payload.reference_service?.name;
+  const staffRows = payload.by_staff ?? [];
+  const hours = payload.working_hours_for_day ?? [];
+
+  if ((payload.total_free_slots ?? 0) === 0 || staffRows.every((r) => r.free_slots === 0)) {
+    return `No free slots on ${dateLabel}${serviceName ? ` for ${serviceName}` : ''}.`;
+  }
+
+  const lines: string[] = [
+    `${payload.total_free_slots} free slot${payload.total_free_slots === 1 ? '' : 's'} on ${dateLabel}${serviceName ? ` (${serviceName})` : ''}:`,
+  ];
+
+  for (const row of staffRows) {
+    if (row.free_slots === 0) continue;
+    const times = row.free_local_times.join(', ');
+    lines.push(`- ${row.staff_name}: ${row.free_slots} — ${times}`);
+    const wh = hours.find((h) => h.staff_name === row.staff_name && h.works_this_day);
+    if (wh?.start_time && wh.end_time) {
+      lines.push(`  Working hours: ${wh.start_time}–${wh.end_time}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Hard guard: if free-slot tools ran this turn, the model may not invent HH:mm
+ * values. Any reply that mentions a clock time outside the tool allowlist is
+ * replaced with a server-formatted answer from the tool JSON.
+ */
+function enforceFreeSlotReply(
+  reply: string,
+  freeSlotPayloads: FreeSlotToolPayload[],
+): string {
+  if (freeSlotPayloads.length === 0) return reply;
+
+  const latest = freeSlotPayloads[freeSlotPayloads.length - 1]!;
+  const allow = allowedFreeTimes(latest);
+  const mentioned = extractClockTokens(reply);
+  const invented = mentioned.filter((t) => !allow.has(t));
+
+  // list_free_slots answers must be exact — always use authoritative text.
+  // count_available_slots: only rewrite when the model invents times.
+  if (latest.tool === 'list_free_slots' || invented.length > 0) {
+    return formatAuthoritativeFreeSlotReply(latest);
+  }
+
+  return reply;
+}
+
+function parseFreeSlotToolResult(
+  name: string,
+  result: string,
+): FreeSlotToolPayload | null {
+  if (name !== 'count_available_slots' && name !== 'list_free_slots') return null;
+  try {
+    const parsed = JSON.parse(result) as FreeSlotToolPayload & { error?: string };
+    if (parsed.error) return null;
+    return { ...parsed, tool: name };
+  } catch {
+    return null;
+  }
+}
+
 // ─── Loop ─────────────────────────────────────────────────────────────────────
 
 export async function runAdminAgentLoop(
@@ -819,6 +904,7 @@ export async function runAdminAgentLoop(
   const provider = getAgentLlmProvider();
   const MAX_ITERATIONS = 10;
   let iterations = 0;
+  const freeSlotPayloads: FreeSlotToolPayload[] = [];
 
   while (iterations < MAX_ITERATIONS) {
     iterations++;
@@ -832,7 +918,17 @@ export async function runAdminAgentLoop(
     messages.push({ role: 'assistant', parts: response.parts });
 
     if (response.stopReason === 'end_turn') {
-      return { reply: extractReplyText(response.parts), messages };
+      const raw = extractReplyText(response.parts);
+      const reply = enforceFreeSlotReply(raw, freeSlotPayloads);
+      // Dashboard renders `messages`, not `reply` — keep them in sync when we
+      // replace invented clock times with the tool-backed answer.
+      if (reply !== raw) {
+        const last = messages[messages.length - 1];
+        if (last?.role === 'assistant') {
+          last.parts = [{ kind: 'text', text: reply }];
+        }
+      }
+      return { reply, messages };
     }
 
     const toolCalls = response.parts.filter(
@@ -840,12 +936,17 @@ export async function runAdminAgentLoop(
     );
 
     const toolResults = await Promise.all(
-      toolCalls.map(async (call) => ({
-        kind: 'tool_result' as const,
-        id: call.id,
-        name: call.name,
-        result: await dispatchAdminTool(call.name, call.args, { businessId }),
-      })),
+      toolCalls.map(async (call) => {
+        const result = await dispatchAdminTool(call.name, call.args, { businessId });
+        const freePayload = parseFreeSlotToolResult(call.name, result);
+        if (freePayload) freeSlotPayloads.push(freePayload);
+        return {
+          kind: 'tool_result' as const,
+          id: call.id,
+          name: call.name,
+          result,
+        };
+      }),
     );
 
     messages.push({ role: 'user', parts: toolResults });
