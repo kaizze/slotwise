@@ -116,18 +116,22 @@ function resolveDate(dateStr: string, tz = 'UTC'): string {
     .replace(/[?.!,;:'"]+$/g, '')
     .replace(/^[?.!,;:'"]+/g, '');
 
-  // English day names
-  const enDays = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
-  // Greek day names (nominative and common spoken forms)
-  const elDays = ['κυριακή','κυριακη','δευτέρα','δευτερα','τρίτη','τριτη','τετάρτη','τεταρτη','πέμπτη','πεμπτη','παρασκευή','παρασκευη','σάββατο','σαββατο'];
+  // Map weekday phrases → JS day() (0=Sunday). Greek forms must NOT be a flat
+  // indexOf list — that mapped δευτέρα→Tuesday and παρασκευή→garbage.
+  const weekdays: Array<{ keys: string[]; dow: number }> = [
+    { keys: ['sunday', 'κυριακή', 'κυριακη'], dow: 0 },
+    { keys: ['monday', 'δευτέρα', 'δευτερα'], dow: 1 },
+    { keys: ['tuesday', 'τρίτη', 'τριτη'], dow: 2 },
+    { keys: ['wednesday', 'τετάρτη', 'τεταρτη'], dow: 3 },
+    { keys: ['thursday', 'πέμπτη', 'πεμπτη'], dow: 4 },
+    { keys: ['friday', 'παρασκευή', 'παρασκευη'], dow: 5 },
+    { keys: ['saturday', 'σάββατο', 'σαββατο'], dow: 6 },
+  ];
 
-  const enIdx = enDays.indexOf(lower);
-  const elIdx = elDays.indexOf(lower);
-  const dayIndex = enIdx !== -1 ? enIdx : elIdx;
-
-  if (dayIndex !== -1) {
+  for (const day of weekdays) {
+    if (!day.keys.some((key) => lower === key || lower.includes(key))) continue;
     const today = now.day();
-    let diff = dayIndex - today;
+    let diff = day.dow - today;
     if (diff <= 0) diff += 7;
     return now.add(diff, 'day').format('YYYY-MM-DD');
   }
