@@ -238,6 +238,57 @@ export const BookingService = {
   },
 
   /**
+   * Move a confirmed/pending booking to another staff member at the same time.
+   * Checks service eligibility and schedule conflicts on the target staff.
+   */
+  async reassignStaff(businessId: string, ref: string, newStaffId: string): Promise<Booking> {
+    const existing = await db.queryOne<BookingRow>(`
+      SELECT * FROM bookings
+      WHERE ref = $1 AND business_id = $2
+        AND status IN ('confirmed', 'pending', 'requested')
+    `, [ref, businessId]);
+
+    if (!existing) throw new Error('Booking not found or not reassignable');
+
+    if (existing.staff_id === newStaffId) {
+      return toBooking(existing);
+    }
+
+    const staff = await db.queryOne<{ id: string; service_ids: string[]; is_active: boolean }>(`
+      SELECT id, service_ids, is_active FROM staff
+      WHERE id = $1 AND business_id = $2
+    `, [newStaffId, businessId]);
+
+    if (!staff || !staff.is_active) throw new Error('Target staff not found or inactive');
+    if (!staff.service_ids.includes(existing.service_id)) {
+      throw new Error('Target staff cannot perform this service');
+    }
+
+    const conflict = await db.query(`
+      SELECT id FROM bookings
+      WHERE staff_id = $1
+        AND status NOT IN ('cancelled', 'no_show')
+        AND id != $4
+        AND tstzrange(starts_at, ends_at) && tstzrange($2::timestamptz, $3::timestamptz)
+    `, [newStaffId, existing.starts_at, existing.ends_at, existing.id]);
+
+    if (conflict.rows.length > 0) {
+      throw new Error('Target staff already has a booking at that time');
+    }
+
+    const result = await db.query<BookingRow>(`
+      UPDATE bookings
+      SET staff_id = $2, updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `, [existing.id, newStaffId]);
+
+    const updatedRow = result.rows[0];
+    if (!updatedRow) throw new Error('Reassign failed');
+    return toBooking(updatedRow);
+  },
+
+  /**
    * Admin marks a booking as no-show. Increments the customer's
    * no_show_count so future noShowRisk scoring reflects the history.
    * Allowed from confirmed or completed (auto-complete must not block this).

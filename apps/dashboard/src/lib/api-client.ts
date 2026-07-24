@@ -513,3 +513,26 @@ export const customersApi = {
     });
   },
 };
+
+// ─── Admin AI assistant ─────────────────────────────────────────────────────
+
+export interface AdminAssistantChatResult {
+  reply: string;
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  history: unknown[];
+}
+
+export const adminAssistantApi = {
+  async chat(input: {
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    history?: unknown[];
+  }): Promise<AdminAssistantChatResult> {
+    return request<AdminAssistantChatResult>('/api/v1/admin-agent/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        messages: input.messages,
+        ...(input.history && input.history.length > 0 ? { history: input.history } : {}),
+      }),
+    });
+  },
+};
