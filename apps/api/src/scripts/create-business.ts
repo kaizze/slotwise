@@ -139,7 +139,7 @@ async function promptInteractive(): Promise<BusinessConfig> {
     const phone     = await prompt(rl, '  Phone (optional): ');
     const email     = await prompt(rl, '  Email (optional): ');
     const startTime = await promptWithDefault(rl, '  Work start time', '09:00');
-    const endTime   = await promptWithDefault(rl, '  Work end time',   '18:00');
+    const endTime   = await promptWithDefault(rl, '  Work end time',   '17:00');
     const daysStr   = await promptWithDefault(rl, '  Work days (Mon=1..Sun=0, comma-separated)', '1,2,3,4,5');
 
     const workDays = daysStr

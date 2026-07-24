@@ -57,5 +57,5 @@ export const TIMEZONES = [
 export const DEFAULT_WEEKDAY_HOURS = [1, 2, 3, 4, 5].map((dayOfWeek) => ({
   dayOfWeek,
   startTime: '09:00',
-  endTime: '18:00',
+  endTime: '17:00',
 }));
