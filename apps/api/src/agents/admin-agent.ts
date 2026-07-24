@@ -48,17 +48,21 @@ export const ADMIN_TOOLS: ToolDefinition[] = [
   {
     name: 'count_available_slots',
     description:
-      'Count free appointment slots for a date (e.g. tomorrow). Sums open slots across services unless service_id is given.',
+      'Count real free capacity for a date. Pass natural language only (tomorrow / monday / αύριο) — never invent YYYY-MM-DD. Returns total openings for a reference service, plus per-staff and per-service breakdowns. Do NOT add per-service counts together (same staff time is shared).',
     parameters: {
       type: 'object',
       required: ['date'],
       properties: {
         date: {
           type: 'string',
-          description: 'Natural language or YYYY-MM-DD: "tomorrow", "αύριο", "Friday", etc.',
+          description: 'Natural language only: "tomorrow", "αύριο", "monday", "Δευτέρα". Prefer words over YYYY-MM-DD.',
         },
-        service_id: { type: 'string', description: 'Optional service UUID to count for one service only' },
+        service_id: {
+          type: 'string',
+          description: 'Optional service UUID. If omitted, uses the shortest active service as the capacity unit.',
+        },
         staff_id: { type: 'string', description: 'Optional staff UUID filter' },
+        staff_name: { type: 'string', description: 'Optional staff name filter, e.g. "Maria"' },
       },
     },
   },
@@ -158,15 +162,24 @@ export function buildAdminSystemPrompt(
 CURRENT DATE (${business.timezone}):
 - Today: ${today}
 - Tomorrow: ${tomorrow}
+- These absolute dates are authoritative. Never call Monday "tomorrow" unless Tomorrow above is Monday.
 
 ROLE:
 - Help the business owner/staff with operational questions and safe schedule changes.
-- Always use tools for counts and lists — never invent numbers.
+- Always use tools for counts and lists — never invent numbers or dates.
+- When reporting a day, use date_searched / local_date from the tool result (weekday + YYYY-MM-DD).
 - Keep answers concise and practical (bullet points when listing).
 - Reply in ${language} unless the owner writes in another language — then follow them.
 
+FREE SLOTS RULES:
+- For "how many free slots…", call count_available_slots with date="tomorrow" or date="monday" (natural language).
+- Never invent a YYYY-MM-DD yourself.
+- Use total_free_slots from the tool as the headline number. That is real capacity for the reference service.
+- Do NOT add by_service counts together — the same staff time appears under multiple services.
+- When asked "by who", use by_staff from the tool.
+
 CAPABILITIES:
-- Free slot counts for a day
+- Free slot counts for a day (with per-staff breakdown)
 - Inactive / lapsed customers
 - Analytics (busiest service, revenue, no-shows)
 - Booking lists for a day
@@ -180,6 +193,7 @@ WRITE SAFETY:
 
 EXAMPLES:
 - "How many free slots tomorrow?" → count_available_slots date=tomorrow
+- "How many free slots on monday and by who?" → count_available_slots date=monday (then report by_staff)
 - "Who hasn't visited in 3 months?" → get_inactive_customers days=90
 - "Show my busiest service." → get_analytics days=30, then highlight top byService
 - "Move all Friday bookings to Maria." → get_staff + preview_reassign_bookings, summarize, wait for confirmation, then confirm_reassign_bookings`;
@@ -203,29 +217,82 @@ async function resolveStaffByName(businessId: string, name: string) {
   return staff.find((s) => transliterateGreek(s.name).includes(q)) ?? null;
 }
 
-function nextWeekdayDate(input: string, tz: string): string {
-  // Map weekday words onto the upcoming matching day (including today).
-  const lower = input.trim().toLowerCase();
-  const weekdays: Record<string, number> = {
-    sunday: 0, sun: 0, κυριακή: 0, κυριακη: 0,
-    monday: 1, mon: 1, δευτέρα: 1, δευτερα: 1,
-    tuesday: 2, tue: 2, τρίτη: 2, τριτη: 2,
-    wednesday: 3, wed: 3, τετάρτη: 3, τεταρτη: 3,
-    thursday: 4, thu: 4, πέμπτη: 4, πεμπτη: 4,
-    friday: 5, fri: 5, παρασκευή: 5, παρασκευη: 5,
-    saturday: 6, sat: 6, σάββατο: 6, σαββατο: 6,
-  };
+/**
+ * Resolve admin date phrases in the business timezone.
+ * Prefers natural language (tomorrow / monday) over model-invented YYYY-MM-DD.
+ */
+function resolveAdminDate(input: string, tz: string): string {
+  const now = dayjs().tz(tz);
+  const lower = input
+    .toLowerCase()
+    .trim()
+    .replace(/[?.!,;:'"]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  const match = Object.entries(weekdays).find(([key]) => lower.includes(key));
-  if (!match) return resolveBookingDate(input, tz);
-
-  const targetDow = match[1];
-  let cursor = dayjs().tz(tz).startOf('day');
-  for (let i = 0; i < 7; i++) {
-    if (cursor.day() === targetDow) return cursor.format('YYYY-MM-DD');
-    cursor = cursor.add(1, 'day');
+  if (
+    lower === 'tomorrow'
+    || lower === 'αύριο'
+    || lower === 'αυριο'
+    || lower.includes('tomorrow')
+    || lower.includes('αύριο')
+    || lower.includes('αυριο')
+  ) {
+    return now.add(1, 'day').format('YYYY-MM-DD');
   }
+
+  if (
+    lower === 'today'
+    || lower === 'σήμερα'
+    || lower === 'σημερα'
+    || lower.includes('today')
+    || lower.includes('σήμερα')
+    || lower.includes('σημερα')
+  ) {
+    return now.format('YYYY-MM-DD');
+  }
+
+  const weekdays: Array<{ keys: string[]; dow: number }> = [
+    { keys: ['sunday', 'sun', 'κυριακή', 'κυριακη'], dow: 0 },
+    { keys: ['monday', 'mon', 'δευτέρα', 'δευτερα'], dow: 1 },
+    { keys: ['tuesday', 'tue', 'τρίτη', 'τριτη'], dow: 2 },
+    { keys: ['wednesday', 'wed', 'τετάρτη', 'τεταρτη'], dow: 3 },
+    { keys: ['thursday', 'thu', 'πέμπτη', 'πεμπτη'], dow: 4 },
+    { keys: ['friday', 'fri', 'παρασκευή', 'παρασκευη'], dow: 5 },
+    { keys: ['saturday', 'sat', 'σάββατο', 'σαββατο'], dow: 6 },
+  ];
+
+  for (const day of weekdays) {
+    if (day.keys.some((key) => lower === key || lower.includes(` ${key}`) || lower.startsWith(`${key} `) || lower.includes(key))) {
+      // Upcoming matching weekday; if today matches, keep today.
+      let cursor = now.startOf('day');
+      for (let i = 0; i < 7; i++) {
+        if (cursor.day() === day.dow) return cursor.format('YYYY-MM-DD');
+        cursor = cursor.add(1, 'day');
+      }
+    }
+  }
+
+  // Accept explicit ISO dates, but reject clearly wrong far-future hallucinations
+  // more than 14 days out (models sometimes invent training-data dates).
+  if (/^\d{4}-\d{2}-\d{2}$/.test(lower)) {
+    const parsed = dayjs.tz(lower, tz);
+    if (!parsed.isValid()) return now.format('YYYY-MM-DD');
+    const daysAhead = parsed.startOf('day').diff(now.startOf('day'), 'day');
+    if (daysAhead < 0 && Math.abs(daysAhead) > 7) {
+      return now.add(1, 'day').format('YYYY-MM-DD');
+    }
+    if (daysAhead > 14) {
+      return now.add(1, 'day').format('YYYY-MM-DD');
+    }
+    return lower;
+  }
+
   return resolveBookingDate(input, tz);
+}
+
+function nextWeekdayDate(input: string, tz: string): string {
+  return resolveAdminDate(input, tz);
 }
 
 // ─── Tool dispatcher ──────────────────────────────────────────────────────────
@@ -272,21 +339,69 @@ export async function dispatchAdminTool(
       case 'count_available_slots': {
         const business = await BusinessService.getById(businessId);
         const tz = business?.timezone ?? 'UTC';
-        const date = resolveBookingDate(String(toolInput.date ?? 'tomorrow'), tz);
-        const staffId = toolInput.staff_id as string | undefined;
+        const now = dayjs().tz(tz);
+        const date = resolveAdminDate(String(toolInput.date ?? 'tomorrow'), tz);
 
-        let services = await ServiceService.list(businessId);
-        if (toolInput.service_id) {
-          services = services.filter((s) => s.id === toolInput.service_id);
+        let staffId = toolInput.staff_id as string | undefined;
+        if (!staffId && toolInput.staff_name) {
+          const named = await resolveStaffByName(businessId, String(toolInput.staff_name));
+          if (!named) {
+            return JSON.stringify({ error: `No staff found matching "${toolInput.staff_name}"` });
+          }
+          staffId = named.id;
         }
+
+        const services = await ServiceService.list(businessId);
         if (services.length === 0) {
           return JSON.stringify({ error: 'No matching services', date });
         }
 
-        const perService: Array<{ service_id: string; service_name: string; free_slots: number }> = [];
-        let total = 0;
+        // Capacity unit = requested service, else shortest active service.
+        // Summing every service double-counts the same staff time (e.g. 36+36 haircut/blowdry).
+        const sortedByDuration = [...services].sort((a, b) => a.durationMinutes - b.durationMinutes);
+        const referenceService = toolInput.service_id
+          ? services.find((s) => s.id === toolInput.service_id) ?? sortedByDuration[0]!
+          : sortedByDuration[0]!;
+
+        const referenceSlots = await SlotService.getAvailableSlots({
+          businessId,
+          serviceId: referenceService.id,
+          date,
+          staffId,
+          presentation: 'customer',
+          limit: undefined,
+        });
+
+        const byStaffMap = new Map<string, { staff_id: string; staff_name: string; free_slots: number }>();
+        for (const slot of referenceSlots) {
+          const current = byStaffMap.get(slot.staffId) ?? {
+            staff_id: slot.staffId,
+            staff_name: slot.staffName,
+            free_slots: 0,
+          };
+          current.free_slots += 1;
+          byStaffMap.set(slot.staffId, current);
+        }
+
+        const byService: Array<{
+          service_id: string;
+          service_name: string;
+          duration_minutes: number;
+          free_slots: number;
+          note?: string;
+        }> = [];
 
         for (const service of services) {
+          if (service.id === referenceService.id) {
+            byService.push({
+              service_id: service.id,
+              service_name: service.name,
+              duration_minutes: service.durationMinutes,
+              free_slots: referenceSlots.length,
+              note: 'reference_capacity_unit',
+            });
+            continue;
+          }
           const slots = await SlotService.getAvailableSlots({
             businessId,
             serviceId: service.id,
@@ -295,20 +410,32 @@ export async function dispatchAdminTool(
             presentation: 'customer',
             limit: undefined,
           });
-          perService.push({
+          byService.push({
             service_id: service.id,
             service_name: service.name,
+            duration_minutes: service.durationMinutes,
             free_slots: slots.length,
+            note: 'do_not_add_to_total',
           });
-          total += slots.length;
         }
 
         return JSON.stringify({
           date_requested: toolInput.date,
           date_searched: date,
+          local_date: dayjs.tz(date, tz).format('dddd D MMMM YYYY'),
+          today: now.format('YYYY-MM-DD'),
+          tomorrow: now.add(1, 'day').format('YYYY-MM-DD'),
           timezone: tz,
-          total_free_slots: total,
-          by_service: perService,
+          reference_service: {
+            id: referenceService.id,
+            name: referenceService.name,
+            duration_minutes: referenceService.durationMinutes,
+          },
+          total_free_slots: referenceSlots.length,
+          by_staff: [...byStaffMap.values()].sort((a, b) => b.free_slots - a.free_slots),
+          by_service: byService,
+          how_to_reply:
+            'Report total_free_slots and local_date. Use by_staff when asked who is free. Never sum by_service into a new total.',
         });
       }
 
