@@ -153,6 +153,123 @@ export const CustomerCrmService = {
     return { customers, total: Number(countRow.count) };
   },
 
+  /**
+   * Customers with no completed/confirmed visit in the last `days` days
+   * (or never visited). Sorted by oldest last visit first.
+   */
+  async listInactive(businessId: string, options?: {
+    days?: number;
+    limit?: number;
+  }): Promise<{ customers: CustomerCrmSummary[]; total: number; days: number }> {
+    const days = Math.max(1, options?.days ?? 90);
+    const limit = Math.min(100, options?.limit ?? 25);
+
+    const countRow = await db.queryOneOrThrow<{ count: string }>(`
+      SELECT COUNT(*)::text AS count
+      FROM customers c
+      WHERE c.business_id = $1
+        AND COALESCE((
+          SELECT MAX(b.starts_at)
+          FROM bookings b
+          WHERE b.customer_id = c.id
+            AND b.status IN ('completed', 'confirmed')
+            AND b.starts_at <= NOW()
+        ), c.created_at) < NOW() - ($2::text || ' days')::interval
+    `, [businessId, String(days)]);
+
+    const result = await db.query<{
+      id: string;
+      name: string;
+      phone: string;
+      email: string | null;
+      notes: string | null;
+      preferences: string | null;
+      created_at: Date;
+      last_visit_at: Date | null;
+      total_spent: string;
+      bookings_count: string;
+      no_shows: string;
+      favourite_staff_id: string | null;
+      favourite_staff_name: string | null;
+      currency: string;
+    }>(`
+      SELECT
+        c.id,
+        c.name,
+        c.phone,
+        c.email,
+        c.notes,
+        c.preferences,
+        c.created_at,
+        c.favourite_staff_id,
+        fav.name AS favourite_staff_name,
+        (
+          SELECT MAX(b.starts_at)
+          FROM bookings b
+          WHERE b.customer_id = c.id
+            AND b.status IN ('completed', 'confirmed')
+            AND b.starts_at <= NOW()
+        ) AS last_visit_at,
+        COALESCE((
+          SELECT SUM(s.price)
+          FROM bookings b
+          JOIN services s ON s.id = b.service_id
+          WHERE b.customer_id = c.id
+            AND b.status IN ${relativeMoneyStatuses()}
+        ), 0)::text AS total_spent,
+        COALESCE((
+          SELECT COUNT(*)
+          FROM bookings b
+          WHERE b.customer_id = c.id
+            AND b.status <> 'cancelled'
+        ), 0)::text AS bookings_count,
+        COALESCE((
+          SELECT COUNT(*)
+          FROM bookings b
+          WHERE b.customer_id = c.id
+            AND b.status = 'no_show'
+        ), c.no_show_count, 0)::text AS no_shows,
+        COALESCE((
+          SELECT s.currency FROM services s
+          WHERE s.business_id = c.business_id AND s.is_active = TRUE
+          LIMIT 1
+        ), 'EUR') AS currency
+      FROM customers c
+      LEFT JOIN staff fav ON fav.id = c.favourite_staff_id
+      WHERE c.business_id = $1
+        AND COALESCE((
+          SELECT MAX(b.starts_at)
+          FROM bookings b
+          WHERE b.customer_id = c.id
+            AND b.status IN ('completed', 'confirmed')
+            AND b.starts_at <= NOW()
+        ), c.created_at) < NOW() - ($2::text || ' days')::interval
+      ORDER BY last_visit_at ASC NULLS FIRST, c.name ASC
+      LIMIT $3
+    `, [businessId, String(days), limit]);
+
+    const customers = result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      phone: row.phone,
+      email: row.email ?? undefined,
+      lastVisitAt: row.last_visit_at ? new Date(row.last_visit_at).toISOString() : null,
+      totalSpent: Number(row.total_spent),
+      currency: row.currency,
+      bookingsCount: Number(row.bookings_count),
+      noShows: Number(row.no_shows),
+      notes: row.notes ?? undefined,
+      preferences: row.preferences ?? undefined,
+      favouriteStaffId: row.favourite_staff_id,
+      favouriteEmployee: row.favourite_staff_id
+        ? { id: row.favourite_staff_id, name: row.favourite_staff_name ?? 'Staff' }
+        : null,
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+
+    return { customers, total: Number(countRow.count), days };
+  },
+
   async getDetail(businessId: string, customerId: string): Promise<CustomerCrmDetail | null> {
     const row = await db.queryOne<{
       id: string;

@@ -9,6 +9,7 @@ import type { ReactNode } from 'react';
 const NAV_ITEMS = [
   { href: '/', label: 'Today' },
   { href: '/calendar', label: 'Calendar' },
+  { href: '/assistant', label: 'AI Assistant' },
   { href: '/customers', label: 'Customers' },
   { href: '/analytics', label: 'Analytics' },
   { href: '/waitlist', label: 'Waitlist' },

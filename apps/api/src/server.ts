@@ -18,6 +18,7 @@ import { offerRoutes } from './routes/offers.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { customerRoutes } from './routes/customers.js';
 import { customerAuthRoutes } from './routes/customer-auth.js';
+import { adminAgentRoutes } from './routes/admin-agent.js';
 import { db } from './db/client.js';
 import { startNotificationWorker, stopNotificationWorker } from './queues/notification-worker.js';
 
@@ -109,6 +110,8 @@ await server.register(analyticsRoutes,{ prefix: '/api/v1/analytics' });
 await server.register(customerRoutes, { prefix: '/api/v1/customers' });
 // Public customer register/login for the booking widget (Bearer tokens, open CORS).
 await server.register(customerAuthRoutes, { prefix: '/api/v1/customer-auth' });
+// Dashboard ops assistant (Bearer auth, open CORS — same pattern as admin bookings).
+await server.register(adminAgentRoutes, { prefix: '/api/v1/admin-agent' });
 
 // Webhooks (Twilio) are server-to-server — no browser CORS involved at all.
 await server.register(webhookRoutes, { prefix: '/webhooks' });
