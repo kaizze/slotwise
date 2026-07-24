@@ -47,8 +47,7 @@ BEGIN
     )
     FROM jsonb_array_elements(COALESCE(s.working_hours, '[]'::jsonb))
       WITH ORDINALITY AS t(elem, ordinality)
-  ), '[]'::jsonb),
-      updated_at = now()
+  ), '[]'::jsonb)
   WHERE s.business_id = v_business_id;
 
   GET DIAGNOSTICS v_updated = ROW_COUNT;

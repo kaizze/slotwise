@@ -198,7 +198,7 @@ FREE SLOTS RULES:
 - NEVER call list_bookings to answer free/κενές questions — that tool only returns occupied appointments.
 - NEVER invent clock times (e.g. 07:00, 08:00, 08:30, 16:30). Only quote local_times / free_local_times from tools, verbatim.
 - Do not invent "before first booking" or "after last booking" ranges. If the tool says 17:00 and 17:30, say exactly that.
-- Free times can be after the last calendar booking when staff working_hours end later (e.g. bookings until 17:00, hours until 18:00). That is normal — quote the tool times and mention working_hours_for_day if present.
+- Free times can be after the last calendar booking when staff working_hours end later (e.g. bookings until 17:00, hours until 18:00). Quote the tool times and mention working_hours_for_day end_time so the owner sees why.
 - If local_times / free_local_times is empty, say they have no free slots — do not guess.
 - Never invent a YYYY-MM-DD yourself.
 - Use total_free_slots from the tool as the headline number. That is real capacity for the reference service.
