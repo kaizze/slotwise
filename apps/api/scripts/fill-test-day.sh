@@ -7,7 +7,8 @@
 #   ./apps/api/scripts/fill-test-day.sh 2026-07-15      # specific date
 #   ./apps/api/scripts/fill-test-day.sh tomorrow salon-eleni
 #
-# Creates bookings for ONE staff member (09:00–17:00 local), rotating these emails:
+# Creates bookings for ONE staff member across their working hours that day
+# (start/end from staff.working_hours; skips break), rotating these emails:
 #   m1lonasdm@gmail.com, dm@cloduevo.ai, dimitris@tidesofweb.com
 # Random Greek names + sequential fake phones (0100000000, 0100000001, ...).
 # Skips already-booked slots.
@@ -34,8 +35,15 @@ DECLARE
   v_service_name     text;
   v_duration         int;
   v_day_local        date;
+  v_dow              int;
+  v_start_hhmm       text;
+  v_end_hhmm         text;
+  v_break_start      text;
+  v_break_end        text;
   v_slot             timestamptz;
   v_day_end          timestamptz;
+  v_break_from       timestamptz;
+  v_break_to         timestamptz;
   v_customer_id      uuid;
   v_name             text;
   v_phone            text;
@@ -110,13 +118,45 @@ BEGIN
     RAISE EXCEPTION 'No active services for business %', v_slug;
   END IF;
 
-  v_slot    := (v_day_local::text || ' 09:00')::timestamp AT TIME ZONE v_tz;
-  v_day_end := (v_day_local::text || ' 17:00')::timestamp AT TIME ZONE v_tz;
+  -- Postgres DOW: 0=Sunday … 6=Saturday (matches WorkingHours.dayOfWeek)
+  v_dow := EXTRACT(DOW FROM v_day_local)::int;
 
-  RAISE NOTICE 'Filling % (%) with staff=% service=% (% min)',
-    v_day_local, v_tz, v_staff_name, v_service_name, v_duration;
+  SELECT
+    wh->>'startTime',
+    wh->>'endTime',
+    wh->>'breakStart',
+    wh->>'breakEnd'
+  INTO v_start_hhmm, v_end_hhmm, v_break_start, v_break_end
+  FROM staff s
+  CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.working_hours, '[]'::jsonb)) AS wh
+  WHERE s.id = v_staff_id
+    AND (wh->>'dayOfWeek')::int = v_dow
+  LIMIT 1;
+
+  IF v_start_hhmm IS NULL OR v_end_hhmm IS NULL THEN
+    RAISE EXCEPTION 'Staff % has no working_hours for dayOfWeek=%', v_staff_name, v_dow;
+  END IF;
+
+  v_slot    := (v_day_local::text || ' ' || v_start_hhmm)::timestamp AT TIME ZONE v_tz;
+  v_day_end := (v_day_local::text || ' ' || v_end_hhmm)::timestamp AT TIME ZONE v_tz;
+
+  IF v_break_start IS NOT NULL AND v_break_end IS NOT NULL THEN
+    v_break_from := (v_day_local::text || ' ' || v_break_start)::timestamp AT TIME ZONE v_tz;
+    v_break_to   := (v_day_local::text || ' ' || v_break_end)::timestamp AT TIME ZONE v_tz;
+  END IF;
+
+  RAISE NOTICE 'Filling % (%) with staff=% service=% (% min) hours=%-% break=%-%',
+    v_day_local, v_tz, v_staff_name, v_service_name, v_duration,
+    v_start_hhmm, v_end_hhmm, COALESCE(v_break_start, '-'), COALESCE(v_break_end, '-');
 
   WHILE v_slot + (v_duration || ' minutes')::interval <= v_day_end LOOP
+    IF v_break_from IS NOT NULL AND v_break_to IS NOT NULL
+       AND v_slot < v_break_to
+       AND v_slot + (v_duration || ' minutes')::interval > v_break_from THEN
+      v_slot := v_break_to;
+      CONTINUE;
+    END IF;
+
     IF v_slot < now() THEN
       v_skipped := v_skipped + 1;
       v_slot := v_slot + (v_duration || ' minutes')::interval;
