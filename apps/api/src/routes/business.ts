@@ -12,6 +12,8 @@ const updateSettingsSchema = z.object({
   smsEnabled: z.boolean().optional(),
   emailEnabled: z.boolean().optional(),
   agentEnabled: z.boolean().optional(),
+  reminderEnabled: z.boolean().optional(),
+  reminderHoursBefore: z.number().min(1).max(168).optional(),
   noShowThreshold: z.number().min(0).max(1).optional(),
 });
 

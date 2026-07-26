@@ -48,6 +48,8 @@ export const BusinessService = {
       smsEnabled: false,
       emailEnabled: true,
       agentEnabled: false,
+      reminderEnabled: true,
+      reminderHoursBefore: 24,
       noShowThreshold: 0.5,
     };
 

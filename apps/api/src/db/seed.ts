@@ -41,6 +41,8 @@ async function seed() {
         smsEnabled: false,
         emailEnabled: true,
         agentEnabled: true,
+        reminderEnabled: true,
+        reminderHoursBefore: 24,
         noShowThreshold: 0.5,
       }),
       'pro',
