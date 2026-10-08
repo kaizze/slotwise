@@ -26,7 +26,7 @@ interface StaffFormState {
 function emptyForm(): StaffFormState {
   const workingDays: StaffFormState['workingDays'] = {};
   for (const d of DAYS) {
-    workingDays[d.value] = { enabled: d.value >= 1 && d.value <= 5, startTime: '09:00', endTime: '18:00' };
+    workingDays[d.value] = { enabled: d.value >= 1 && d.value <= 5, startTime: '09:00', endTime: '17:00' };
   }
   return { name: '', email: '', phone: '', serviceIds: [], workingDays };
 }
@@ -37,7 +37,7 @@ function staffToForm(staff: DashboardStaff): StaffFormState {
     const existing = staff.workingHours.find((wh) => wh.dayOfWeek === d.value);
     workingDays[d.value] = existing
       ? { enabled: true, startTime: existing.startTime, endTime: existing.endTime }
-      : { enabled: false, startTime: '09:00', endTime: '18:00' };
+      : { enabled: false, startTime: '09:00', endTime: '17:00' };
   }
   return {
     name: staff.name,

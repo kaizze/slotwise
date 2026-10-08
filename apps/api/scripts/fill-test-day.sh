@@ -12,6 +12,10 @@
 #   m1lonasdm@gmail.com, dm@cloduevo.ai, dimitris@tidesofweb.com
 # Random Greek names + sequential fake phones (0100000000, 0100000001, ...).
 # Skips already-booked slots.
+#
+# If the AI still shows evening free slots after a "full" day, staff endTime is
+# later than the last booking — either re-run this script (fills to endTime) or:
+#   ./apps/api/scripts/set-staff-end-time.sh salon-eleni 17:00
 
 set -euo pipefail
 

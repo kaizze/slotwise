@@ -36,7 +36,7 @@ function OnboardingWizard() {
   const [staffName, setStaffName] = useState('');
   const [staffEmail, setStaffEmail] = useState('');
   const [startTime, setStartTime] = useState('09:00');
-  const [endTime, setEndTime] = useState('18:00');
+  const [endTime, setEndTime] = useState('17:00');
   const [savingStaff, setSavingStaff] = useState(false);
 
   async function refreshSetup() {

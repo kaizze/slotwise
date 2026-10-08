@@ -73,7 +73,7 @@ async function seed() {
     const workingHours = [1, 2, 3, 4, 5].map((day) => ({  // Mon–Fri
       dayOfWeek: day,
       startTime: '09:00',
-      endTime: '18:00',
+      endTime: '17:00',
       breakStart: '13:00',
       breakEnd: '14:00',
     }));
