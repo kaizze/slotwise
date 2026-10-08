@@ -151,6 +151,43 @@ export function SettingsPage() {
       </section>
 
       <section style={styles.section}>
+        <h2 style={styles.sectionTitle}>Reminders</h2>
+
+        <label style={formStyles.checkboxRow}>
+          <input
+            type="checkbox"
+            checked={settings.reminderEnabled ?? true}
+            disabled={!isOwner}
+            onChange={(e) => update('reminderEnabled', e.target.checked)}
+          />
+          <span>
+            Send appointment reminders
+            <div style={formStyles.helpText}>
+              Customers get a reminder by email/SMS before their booking (uses the channels enabled above).
+            </div>
+          </span>
+        </label>
+
+        <div style={formStyles.field}>
+          <label style={formStyles.label} htmlFor="reminderHoursBefore">Hours before appointment</label>
+          <input
+            id="reminderHoursBefore"
+            style={formStyles.input}
+            type="number"
+            min={1}
+            max={168}
+            step={1}
+            value={settings.reminderHoursBefore ?? 24}
+            disabled={!isOwner || !(settings.reminderEnabled ?? true)}
+            onChange={(e) => update('reminderHoursBefore', Math.max(1, Math.min(168, Number(e.target.value) || 24)))}
+          />
+          <div style={formStyles.helpText}>
+            Default is 24 hours before the appointment.
+          </div>
+        </div>
+      </section>
+
+      <section style={styles.section}>
         <h2 style={styles.sectionTitle}>No-show protection</h2>
 
         <div style={formStyles.field}>
@@ -166,7 +203,7 @@ export function SettingsPage() {
             onChange={(e) => update('noShowThreshold', parseFloat(e.target.value))}
           />
           <div style={formStyles.helpText}>
-            Bookings scored above {Math.round(settings.noShowThreshold * 100)}% no-show risk get an extra reminder before the appointment.
+            Bookings scored above {Math.round(settings.noShowThreshold * 100)}% no-show risk get an extra reminder 2 hours before the appointment.
           </div>
         </div>
       </section>

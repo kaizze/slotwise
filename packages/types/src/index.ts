@@ -29,6 +29,10 @@ export interface BusinessSettings {
   smsEnabled: boolean;
   emailEnabled: boolean;
   agentEnabled: boolean;
+  /** When true (default), customers get a reminder before the appointment. */
+  reminderEnabled?: boolean;
+  /** Hours before starts_at to send the standard reminder (default 24). */
+  reminderHoursBefore?: number;
   noShowThreshold: number;     // risk score above which extra reminder fires
 }
 

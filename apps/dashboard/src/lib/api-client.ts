@@ -72,6 +72,8 @@ export interface BusinessSettings {
   smsEnabled: boolean;
   emailEnabled: boolean;
   agentEnabled: boolean;
+  reminderEnabled?: boolean;
+  reminderHoursBefore?: number;
   noShowThreshold: number;
 }
 

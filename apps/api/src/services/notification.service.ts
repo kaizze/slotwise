@@ -82,6 +82,59 @@ async function enqueueForCustomer(
   }
 }
 
+interface ReminderSettings {
+  enabled: boolean;
+  hoursBefore: number;
+  noShowThreshold: number;
+}
+
+async function getReminderSettings(businessId: string): Promise<ReminderSettings> {
+  const row = await db.queryOneOrThrow<{
+    reminder_enabled: boolean;
+    reminder_hours: number;
+    no_show_threshold: number;
+  }>(`
+    SELECT
+      COALESCE((settings->>'reminderEnabled')::boolean, true) AS reminder_enabled,
+      COALESCE((settings->>'reminderHoursBefore')::numeric, 24) AS reminder_hours,
+      COALESCE((settings->>'noShowThreshold')::numeric, 0.5) AS no_show_threshold
+    FROM businesses
+    WHERE id = $1
+  `, [businessId]);
+
+  const hours = Number(row.reminder_hours);
+  return {
+    enabled: row.reminder_enabled,
+    hoursBefore: Number.isFinite(hours) && hours > 0 ? hours : 24,
+    noShowThreshold: Number(row.no_show_threshold) || 0.5,
+  };
+}
+
+/** Cancel unsent reminders for a booking (e.g. on reschedule / cancel). */
+async function cancelPendingReminders(bookingId: string): Promise<void> {
+  await db.query(`
+    UPDATE notifications
+    SET status = 'cancelled', last_error = 'superseded'
+    WHERE booking_id = $1
+      AND type = 'reminder'
+      AND status = 'pending'
+  `, [bookingId]);
+}
+
+function computeReminderSendAt(startsAt: Date, hoursBefore: number): Date | null {
+  const now = Date.now();
+  const startMs = startsAt.getTime();
+  // Too close / already started — do not remind.
+  if (startMs <= now + 30 * 60_000) return null;
+
+  const target = startMs - hoursBefore * 60 * 60_000;
+  if (target > now) return new Date(target);
+
+  // Inside the reminder window (e.g. booked yesterday for tomorrow, deploy mid-window):
+  // send on the next worker tick rather than skipping.
+  return new Date();
+}
+
 export const NotificationService = {
 
   async scheduleConfirmation(booking: Booking): Promise<void> {
@@ -95,12 +148,39 @@ export const NotificationService = {
   },
 
   /**
+   * Standard pre-appointment reminder (default 24h before).
+   * Controlled by business settings reminderEnabled / reminderHoursBefore.
+   */
+  async scheduleStandardReminder(booking: Booking): Promise<void> {
+    const settings = await getReminderSettings(booking.businessId);
+    if (!settings.enabled) return;
+
+    const scheduledFor = computeReminderSendAt(booking.startsAt, settings.hoursBefore);
+    if (!scheduledFor) return;
+
+    const channels = await getChannelPreferences(booking.businessId, booking.customerId);
+    await enqueueForCustomer({
+      businessId: booking.businessId,
+      bookingId: booking.id,
+      customerId: booking.customerId,
+      type: 'reminder',
+      scheduledFor,
+      payload: {
+        kind: 'standard',
+        hoursBefore: settings.hoursBefore,
+      },
+    }, channels);
+  },
+
+  /**
    * High no-show-risk bookings get a second reminder closer to the appointment.
    * Scheduled for 2 hours before the appointment (capped to "now" if that's already past).
    */
   async scheduleExtraReminder(booking: Booking): Promise<void> {
     const twoHoursBefore = new Date(booking.startsAt.getTime() - 2 * 60 * 60_000);
     const scheduledFor = twoHoursBefore > new Date() ? twoHoursBefore : new Date();
+    if (booking.startsAt.getTime() <= Date.now() + 15 * 60_000) return;
+
     const channels = await getChannelPreferences(booking.businessId, booking.customerId);
 
     await enqueueForCustomer({
@@ -109,10 +189,35 @@ export const NotificationService = {
       customerId: booking.customerId,
       type: 'reminder',
       scheduledFor,
+      payload: {
+        kind: 'extra',
+        hoursBefore: 2,
+      },
     }, channels);
   },
 
+  /**
+   * Schedule confirmation + standard 24h reminder (+ optional high-risk 2h reminder).
+   * Replaces any pending reminders first (safe for reschedule).
+   */
+  async scheduleBookingNotifications(
+    booking: Booking,
+    options: { includeExtraReminder?: boolean } = {},
+  ): Promise<void> {
+    await cancelPendingReminders(booking.id);
+    await this.scheduleConfirmation(booking);
+    await this.scheduleStandardReminder(booking);
+
+    if (options.includeExtraReminder) {
+      const settings = await getReminderSettings(booking.businessId);
+      if (booking.noShowRisk > settings.noShowThreshold) {
+        await this.scheduleExtraReminder(booking);
+      }
+    }
+  },
+
   async scheduleCancellationNotice(booking: Booking): Promise<void> {
+    await cancelPendingReminders(booking.id);
     const channels = await getChannelPreferences(booking.businessId, booking.customerId);
     await enqueueForCustomer({
       businessId: booking.businessId,
@@ -120,6 +225,70 @@ export const NotificationService = {
       customerId: booking.customerId,
       type: 'cancellation',
     }, channels);
+  },
+
+  /**
+   * Backfill standard reminders for upcoming confirmed bookings that don't have one yet.
+   * Safe to call from the notification worker poll loop.
+   */
+  async scheduleMissingStandardReminders(limit = 40): Promise<number> {
+    const rows = await db.query<{
+      id: string;
+      business_id: string;
+      customer_id: string;
+      starts_at: Date;
+      no_show_risk: number;
+      reminder_hours: number;
+    }>(`
+      SELECT
+        b.id,
+        b.business_id,
+        b.customer_id,
+        b.starts_at,
+        b.no_show_risk,
+        COALESCE((biz.settings->>'reminderHoursBefore')::numeric, 24) AS reminder_hours
+      FROM bookings b
+      JOIN businesses biz ON biz.id = b.business_id
+      WHERE b.status = 'confirmed'
+        AND b.starts_at > NOW() + interval '30 minutes'
+        AND COALESCE((biz.settings->>'reminderEnabled')::boolean, true) = true
+        AND NOT EXISTS (
+          SELECT 1 FROM notifications n
+          WHERE n.booking_id = b.id
+            AND n.type = 'reminder'
+            AND n.status IN ('pending', 'processing', 'sent')
+            AND COALESCE(n.payload->>'kind', 'standard') = 'standard'
+        )
+      ORDER BY b.starts_at ASC
+      LIMIT $1
+    `, [limit]);
+
+    let scheduled = 0;
+    for (const row of rows.rows) {
+      const hours = Number(row.reminder_hours);
+      const hoursBefore = Number.isFinite(hours) && hours > 0 ? hours : 24;
+      const scheduledFor = computeReminderSendAt(new Date(row.starts_at), hoursBefore);
+      if (!scheduledFor) continue;
+
+      const channels = await getChannelPreferences(row.business_id, row.customer_id);
+      if (!channels.sms && !channels.email) continue;
+
+      await enqueueForCustomer({
+        businessId: row.business_id,
+        bookingId: row.id,
+        customerId: row.customer_id,
+        type: 'reminder',
+        scheduledFor,
+        payload: {
+          kind: 'standard',
+          hoursBefore,
+          backfilled: true,
+        },
+      }, channels);
+      scheduled += 1;
+    }
+
+    return scheduled;
   },
 
   async sendWaitlistOffer(
