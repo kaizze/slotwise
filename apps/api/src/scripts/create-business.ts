@@ -179,9 +179,11 @@ async function createBusiness(config: BusinessConfig): Promise<void> {
       bufferMinutes: 0,
       maxAdvanceDays: 30,
         requiresDeposit: false,
-        smsEnabled: false,
-        emailEnabled: true,
-        agentEnabled: true,
+      smsEnabled: false,
+      smsProvider: 'apifon',
+      smsSenderId: '',
+      emailEnabled: true,
+      agentEnabled: true,
       noShowThreshold: 0.5,
     };
 

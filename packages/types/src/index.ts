@@ -20,6 +20,8 @@ export type BusinessType =
   | 'fitness'
   | 'other';
 
+export type SmsProvider = 'twilio' | 'apifon';
+
 export interface BusinessSettings {
   slotDurationMinutes: number;
   bufferMinutes: number;       // gap between bookings
@@ -27,6 +29,10 @@ export interface BusinessSettings {
   requiresDeposit: boolean;
   depositAmount?: number;
   smsEnabled: boolean;
+  /** Outbound SMS gateway when smsEnabled is on. Default twilio. */
+  smsProvider?: SmsProvider;
+  /** Alphanumeric sender for Apifon (max 11 Latin chars), e.g. SalonEleni. */
+  smsSenderId?: string;
   emailEnabled: boolean;
   agentEnabled: boolean;
   noShowThreshold: number;     // risk score above which extra reminder fires
