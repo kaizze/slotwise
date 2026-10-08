@@ -43,6 +43,8 @@ async function seed() {
         smsSenderId: 'SalonEleni',
         emailEnabled: true,
         agentEnabled: true,
+        reminderEnabled: true,
+        reminderHoursBefore: 24,
         noShowThreshold: 0.5,
       }),
       'pro',

@@ -184,6 +184,12 @@ async function createBusiness(config: BusinessConfig): Promise<void> {
       smsSenderId: '',
       emailEnabled: true,
       agentEnabled: true,
+      requiresDeposit: false,
+      smsEnabled: false,
+      emailEnabled: true,
+      agentEnabled: true,
+      reminderEnabled: true,
+      reminderHoursBefore: 24,
       noShowThreshold: 0.5,
     };
 

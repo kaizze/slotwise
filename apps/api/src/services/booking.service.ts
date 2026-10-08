@@ -184,11 +184,10 @@ export const BookingService = {
       [input.customerId]
     );
 
-    // Queue notifications
-    await NotificationService.scheduleConfirmation(booking);
-    if (noShowRisk > 0.4) {
-      await NotificationService.scheduleExtraReminder(booking);
-    }
+    // Queue confirmation + 24h reminder (+ optional high-risk 2h reminder)
+    await NotificationService.scheduleBookingNotifications(booking, {
+      includeExtraReminder: true,
+    });
 
     return booking;
   },
@@ -233,7 +232,10 @@ export const BookingService = {
     if (!updatedRow) throw new Error('Reschedule failed');
 
     const booking = toBooking(updatedRow);
-    await NotificationService.scheduleConfirmation(booking);
+    // Re-schedule confirmation + reminder for the new time (cancels pending reminders).
+    await NotificationService.scheduleBookingNotifications(booking, {
+      includeExtraReminder: true,
+    });
     return booking;
   },
 

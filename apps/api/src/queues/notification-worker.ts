@@ -2,6 +2,7 @@ import { db } from '../db/client.js';
 import { EmailService } from '../services/email.service.js';
 import { smsTemplates, emailTemplates } from '../services/notification-templates.js';
 import { normalizeSmsProvider, sendOutboundSms, sendOutboundWhatsApp } from '../services/sms.service.js';
+import { NotificationService } from '../services/notification.service.js';
 import { BookingService } from '../services/booking.service.js';
 
 interface NotificationRow {
@@ -79,7 +80,30 @@ async function loadContext(row: NotificationRow): Promise<NotificationContext> {
   };
 }
 
+async function bookingStillNotifiable(row: NotificationRow): Promise<boolean> {
+  if (!row.booking_id) return true;
+  if (row.type === 'cancellation') return true;
+
+  const booking = await db.queryOne<{ status: string }>(
+    'SELECT status FROM bookings WHERE id = $1',
+    [row.booking_id],
+  );
+  if (!booking) return false;
+  // Skip reminders/confirmations for cancelled / completed / no-show bookings.
+  return ['confirmed', 'pending', 'requested'].includes(booking.status);
+}
+
 async function dispatchOne(row: NotificationRow): Promise<void> {
+  if (!(await bookingStillNotifiable(row))) {
+    await db.query(
+      `UPDATE notifications
+       SET status = 'cancelled', last_error = 'booking no longer active'
+       WHERE id = $1`,
+      [row.id],
+    );
+    return;
+  }
+
   const ctx = await loadContext(row);
 
   const templateCtx = {
@@ -290,6 +314,16 @@ export function startNotificationWorker(): void {
       await processBatch();
     } catch (err) {
       console.error('[notification-worker] Batch processing error:', err);
+    }
+
+    // Backfill 24h reminders for confirmed bookings created before this feature.
+    try {
+      const scheduled = await NotificationService.scheduleMissingStandardReminders();
+      if (scheduled > 0) {
+        console.info(`[notification-worker] Scheduled ${scheduled} missing reminder(s)`);
+      }
+    } catch (err) {
+      console.error('[notification-worker] Reminder backfill error:', err);
     }
 
     // Auto-complete confirmed bookings 30+ minutes past end (unless marked no-show).

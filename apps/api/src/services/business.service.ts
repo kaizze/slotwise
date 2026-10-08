@@ -50,6 +50,8 @@ export const BusinessService = {
       smsSenderId: '',
       emailEnabled: true,
       agentEnabled: false,
+      reminderEnabled: true,
+      reminderHoursBefore: 24,
       noShowThreshold: 0.5,
     };
 
