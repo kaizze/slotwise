@@ -136,6 +136,46 @@ export function SettingsPage() {
           </span>
         </label>
 
+        {settings.smsEnabled && (
+          <>
+            <div style={formStyles.field}>
+              <label style={formStyles.label} htmlFor="smsProvider">SMS provider</label>
+              <select
+                id="smsProvider"
+                style={formStyles.input}
+                value={settings.smsProvider ?? 'apifon'}
+                disabled={!isOwner}
+                onChange={(e) => update('smsProvider', e.target.value as 'twilio' | 'apifon')}
+              >
+                <option value="apifon">Apifon (Greece)</option>
+                <option value="twilio">Twilio</option>
+              </select>
+              <div style={formStyles.helpText}>
+                Apifon is usually cheaper and easier for Greek mobiles. Server credentials go in the API env file.
+              </div>
+            </div>
+
+            {(settings.smsProvider ?? 'apifon') === 'apifon' && (
+              <div style={formStyles.field}>
+                <label style={formStyles.label} htmlFor="smsSenderId">SMS sender name</label>
+                <input
+                  id="smsSenderId"
+                  style={formStyles.input}
+                  type="text"
+                  maxLength={11}
+                  placeholder="SalonEleni"
+                  value={settings.smsSenderId ?? ''}
+                  disabled={!isOwner}
+                  onChange={(e) => update('smsSenderId', e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 11))}
+                />
+                <div style={formStyles.helpText}>
+                  Shown as the SMS “From” name (max 11 Latin letters/numbers). Must be approved in your Apifon account.
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
         <label style={formStyles.checkboxRow}>
           <input
             type="checkbox"

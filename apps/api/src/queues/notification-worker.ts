@@ -1,7 +1,7 @@
 import { db } from '../db/client.js';
-import { sendSms, sendWhatsApp } from '../services/providers/twilio.provider.js';
 import { EmailService } from '../services/email.service.js';
 import { smsTemplates, emailTemplates } from '../services/notification-templates.js';
+import { normalizeSmsProvider, sendOutboundSms, sendOutboundWhatsApp } from '../services/sms.service.js';
 import { NotificationService } from '../services/notification.service.js';
 import { BookingService } from '../services/booking.service.js';
 
@@ -26,6 +26,7 @@ interface NotificationContext {
   businessName: string;
   businessLocale: string;
   businessTimezone: string;
+  businessSettings: Record<string, unknown>;
   startsAt: Date | null;
   ref: string | null;
 }
@@ -38,6 +39,7 @@ async function loadContext(row: NotificationRow): Promise<NotificationContext> {
     business_name: string;
     business_locale: string;
     business_timezone: string;
+    business_settings: Record<string, unknown> | null;
     service_name: string | null;
     staff_name: string | null;
     starts_at: Date | null;
@@ -50,6 +52,7 @@ async function loadContext(row: NotificationRow): Promise<NotificationContext> {
       b.name  AS business_name,
       b.locale AS business_locale,
       b.timezone AS business_timezone,
+      b.settings AS business_settings,
       s.name  AS service_name,
       st.name AS staff_name,
       bk.starts_at,
@@ -71,6 +74,7 @@ async function loadContext(row: NotificationRow): Promise<NotificationContext> {
     businessName: result.business_name,
     businessLocale: result.business_locale,
     businessTimezone: result.business_timezone,
+    businessSettings: result.business_settings ?? {},
     startsAt: result.starts_at,
     ref: result.ref,
   };
@@ -156,8 +160,16 @@ async function dispatchOne(row: NotificationRow): Promise<void> {
     if (!ctx.customerPhone) throw new Error('Customer has no phone number');
 
     const { providerId } = row.channel === 'whatsapp'
-      ? await sendWhatsApp(ctx.customerPhone, body)
-      : await sendSms(ctx.customerPhone, body);
+      ? await sendOutboundWhatsApp({ to: ctx.customerPhone, body })
+      : await sendOutboundSms({
+          to: ctx.customerPhone,
+          body,
+          provider: normalizeSmsProvider(ctx.businessSettings.smsProvider),
+          senderId: typeof ctx.businessSettings.smsSenderId === 'string'
+            ? ctx.businessSettings.smsSenderId
+            : undefined,
+          referenceId: ctx.ref ?? row.id,
+        });
 
     await db.query(
       `UPDATE notifications SET status = 'sent', sent_at = NOW(), provider_id = $2 WHERE id = $1`,

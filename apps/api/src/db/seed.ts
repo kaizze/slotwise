@@ -39,6 +39,8 @@ async function seed() {
         maxAdvanceDays: 30,
         requiresDeposit: false,
         smsEnabled: false,
+        smsProvider: 'apifon',
+        smsSenderId: 'SalonEleni',
         emailEnabled: true,
         agentEnabled: true,
         reminderEnabled: true,

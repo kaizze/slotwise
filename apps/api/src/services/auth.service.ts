@@ -73,6 +73,8 @@ export const AuthService = {
       maxAdvanceDays: 30,
       requiresDeposit: false,
       smsEnabled: false,
+      smsProvider: 'apifon',
+      smsSenderId: '',
       emailEnabled: true,
       agentEnabled: false,
       reminderEnabled: true,

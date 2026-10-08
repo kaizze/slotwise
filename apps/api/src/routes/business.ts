@@ -10,6 +10,8 @@ const updateSettingsSchema = z.object({
   requiresDeposit: z.boolean().optional(),
   depositAmount: z.number().nonnegative().optional(),
   smsEnabled: z.boolean().optional(),
+  smsProvider: z.enum(['twilio', 'apifon']).optional(),
+  smsSenderId: z.string().max(11).regex(/^[A-Za-z0-9]*$/, 'Sender ID must be alphanumeric').optional(),
   emailEnabled: z.boolean().optional(),
   agentEnabled: z.boolean().optional(),
   reminderEnabled: z.boolean().optional(),

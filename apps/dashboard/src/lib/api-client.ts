@@ -63,6 +63,8 @@ export interface DashboardService {
   isActive: boolean;
 }
 
+export type SmsProvider = 'twilio' | 'apifon';
+
 export interface BusinessSettings {
   slotDurationMinutes: number;
   bufferMinutes: number;
@@ -70,6 +72,8 @@ export interface BusinessSettings {
   requiresDeposit: boolean;
   depositAmount?: number;
   smsEnabled: boolean;
+  smsProvider?: SmsProvider;
+  smsSenderId?: string;
   emailEnabled: boolean;
   agentEnabled: boolean;
   reminderEnabled?: boolean;
