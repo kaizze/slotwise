@@ -19,8 +19,10 @@ import { analyticsRoutes } from './routes/analytics.js';
 import { customerRoutes } from './routes/customers.js';
 import { customerAuthRoutes } from './routes/customer-auth.js';
 import { adminAgentRoutes } from './routes/admin-agent.js';
+import { platformRoutes } from './routes/platform.js';
 import { db } from './db/client.js';
 import { startNotificationWorker, stopNotificationWorker } from './queues/notification-worker.js';
+import { PlatformUserService } from './services/platform-user.service.js';
 
 const server = Fastify({
   logger: {
@@ -57,7 +59,12 @@ const dashboardOrigins = process.env.ALLOWED_ORIGINS?.split(',') ?? ['http://loc
 // Paths that carry the httpOnly refresh cookie and must be locked to the
 // dashboard's known origin(s). Everything else (widget, agent, webhooks) is
 // open — see rationale above.
-const CREDENTIALED_PATH_PREFIXES = ['/api/v1/auth', '/api/v1/staff', '/api/v1/services'];
+const CREDENTIALED_PATH_PREFIXES = [
+  '/api/v1/auth',
+  '/api/v1/staff',
+  '/api/v1/services',
+  '/api/v1/platform',
+];
 
 function isCredentialedPath(url: string): boolean {
   return CREDENTIALED_PATH_PREFIXES.some((prefix) => url.startsWith(prefix));
@@ -113,6 +120,9 @@ await server.register(customerAuthRoutes, { prefix: '/api/v1/customer-auth' });
 // Dashboard ops assistant (Bearer auth, open CORS — same pattern as admin bookings).
 await server.register(adminAgentRoutes, { prefix: '/api/v1/admin-agent' });
 
+// Platform console (SlotWise admins/devs) — cookie refresh + Bearer access.
+await server.register(platformRoutes, { prefix: '/api/v1/platform' });
+
 // Webhooks (Twilio) are server-to-server — no browser CORS involved at all.
 await server.register(webhookRoutes, { prefix: '/webhooks' });
 
@@ -132,6 +142,13 @@ try {
   const port = parseInt(process.env.PORT ?? '3001');
   await server.listen({ port, host: '0.0.0.0' });
   server.log.info(`SlotWise API running on port ${port}`);
+
+  // Bootstrap platform admin from env if configured (idempotent).
+  try {
+    await PlatformUserService.ensureBootstrapAdmin();
+  } catch (err) {
+    server.log.warn({ err }, 'Platform admin bootstrap skipped or failed');
+  }
 
   // Background worker — dispatches queued SMS/email/WhatsApp notifications.
   // Runs in-process for now; split into a separate worker process once volume
