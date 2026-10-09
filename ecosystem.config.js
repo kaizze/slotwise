@@ -48,5 +48,20 @@ module.exports = {
       out_file: '../../logs/dashboard-out.log',
       time: true,
     },
+    {
+      name: 'slotwise-platform',
+      cwd: './apps/platform',
+      script: 'node_modules/.bin/next',
+      args: 'start -p 3003',
+      instances: 1,
+      exec_mode: 'fork',
+      env: {
+        NODE_ENV: 'production',
+      },
+      max_memory_restart: '400M',
+      error_file: '../../logs/platform-error.log',
+      out_file: '../../logs/platform-out.log',
+      time: true,
+    },
   ],
 };

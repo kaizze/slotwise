@@ -73,6 +73,25 @@ export interface CustomerAuthTokenPayload {
   businessId: string;
 }
 
+/** Access-token payload for SlotWise platform console (admin / developer). */
+export type PlatformRole = 'admin' | 'developer';
+
+export interface PlatformUser {
+  id: string;
+  email: string;
+  name: string;
+  role: PlatformRole;
+  isActive: boolean;
+  lastLoginAt?: Date;
+  createdAt: Date;
+}
+
+export interface PlatformAuthTokenPayload {
+  typ: 'platform';
+  userId: string;
+  role: PlatformRole;
+}
+
 // ─── Staff ───────────────────────────────────────────────────────────────────
 
 export interface Staff {

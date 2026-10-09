@@ -1,19 +1,25 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { BusinessService } from '../services/business.service.js';
-import type { Business, AuthTokenPayload, CustomerAuthTokenPayload } from '@slotwise/types';
+import type {
+  Business,
+  AuthTokenPayload,
+  CustomerAuthTokenPayload,
+  PlatformAuthTokenPayload,
+} from '@slotwise/types';
 
 // Extend Fastify request type to carry the resolved business + auth payload
 declare module 'fastify' {
   interface FastifyRequest {
     business?: Business;
     authUser?: AuthTokenPayload;
+    platformUser?: PlatformAuthTokenPayload;
   }
 }
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
-    payload: AuthTokenPayload | CustomerAuthTokenPayload;
-    user: AuthTokenPayload | CustomerAuthTokenPayload;
+    payload: AuthTokenPayload | CustomerAuthTokenPayload | PlatformAuthTokenPayload;
+    user: AuthTokenPayload | CustomerAuthTokenPayload | PlatformAuthTokenPayload;
   }
 }
 
@@ -98,4 +104,33 @@ export async function requireOwner(
   if (request.authUser?.role !== 'owner') {
     return reply.status(403).send({ error: 'Owner role required' });
   }
+}
+
+function isPlatformPayload(payload: unknown): payload is PlatformAuthTokenPayload {
+  if (!payload || typeof payload !== 'object') return false;
+  const p = payload as Record<string, unknown>;
+  return p.typ === 'platform'
+    && typeof p.userId === 'string'
+    && (p.role === 'admin' || p.role === 'developer');
+}
+
+/**
+ * Verifies a platform-console JWT (typ: platform). Rejects merchant/customer tokens.
+ */
+export async function requirePlatformAuth(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  try {
+    await request.jwtVerify();
+  } catch {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+
+  const payload = request.user;
+  if (!isPlatformPayload(payload)) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+
+  request.platformUser = payload;
 }
